@@ -26,7 +26,6 @@ dependencies:
   provider: ^6.1.2
 
   # ── Android: SMS и звонки ─────────────────────────────────────────
-  telephony: ^0.2.0
   permission_handler: ^11.3.1
   flutter_contacts: ^1.1.9+1
 

@@ -56,6 +56,13 @@ jobs:
           flutter config --enable-macos-desktop
           flutter create --platforms=macos . --project-name androidlink
 
+      - name: Set macOS deployment target to 10.14.6
+        run: |
+          find macos -name "project.pbxproj" -exec \
+            sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = [0-9.]*/MACOSX_DEPLOYMENT_TARGET = 10.14.6/g' {} \;
+          # Also update Podfile
+          sed -i '' "s/platform :osx, .*/platform :osx, '10.14.6'/" macos/Podfile
+
       - name: Flutter pub get
         run: flutter pub get
 
