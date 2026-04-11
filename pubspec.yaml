@@ -1,0 +1,55 @@
+name: androidlink
+description: AndroidLink — Your Android on your Mac
+version: 1.0.0+1
+publish_to: none
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ── Сеть ──────────────────────────────────────────────────────────
+  web_socket_channel: ^3.0.1
+  multicast_dns: ^0.3.2+2
+  network_info_plus: ^5.0.0
+  connectivity_plus: ^6.0.5
+
+  # ── macOS UI ──────────────────────────────────────────────────────
+  macos_ui: ^2.0.0
+  window_manager: ^0.3.9
+  local_notifier: ^0.1.6
+
+  # ── State ─────────────────────────────────────────────────────────
+  provider: ^6.1.2
+
+  # ── Android: SMS и звонки ─────────────────────────────────────────
+  telephony: ^0.2.0
+  permission_handler: ^11.3.1
+  flutter_contacts: ^1.1.9+1
+
+  # ── UI ────────────────────────────────────────────────────────────
+  flutter_animate: ^4.5.0
+  timeago: ^3.7.0
+
+  # ── Утилиты ───────────────────────────────────────────────────────
+  uuid: ^4.5.1
+  logger: ^2.4.0
+  device_info_plus: ^10.1.2
+  path_provider: ^2.1.4
+  file_picker: ^8.1.2
+  rxdart: ^0.28.0
+  flutter_secure_storage: ^9.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/icons/
