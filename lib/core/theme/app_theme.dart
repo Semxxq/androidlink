@@ -62,10 +62,8 @@ class AppTheme {
         brightness: Brightness.dark,
         primaryColor: accent,
         canvasColor: background,
-        sidebarStyle: const MacosSidebarStyle(
-          decoration: BoxDecoration(color: Color(0xFF161618)),
-        ),
         typography: MacosTypography(
+          color: textPrimary,
           body:    const TextStyle(
             fontFamily: 'Inter',
             fontSize: 13,
