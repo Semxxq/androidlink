@@ -24,6 +24,9 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Create Android project (v2 embedding)
+        run: flutter create --platforms=android . --project-name androidlink
+
       - name: Flutter pub get
         run: flutter pub get
 
@@ -48,7 +51,7 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Enable macOS + create project files
+      - name: Create macOS project
         run: |
           flutter config --enable-macos-desktop
           flutter create --platforms=macos . --project-name androidlink
