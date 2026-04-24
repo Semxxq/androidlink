@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../bridge/services/bridge_service.dart';
+import 'android_bridge_service.dart';
 import '../../core/theme/app_theme.dart';
 
 /// Android-приложение — минималистичное.
@@ -32,7 +33,7 @@ class _AndroidMainScreenState extends State<AndroidMainScreen> {
   bool _smsGranted     = false;
   bool _callsGranted   = false;
   bool _notifGranted   = false;
-  bool _showIpEntry    = false;
+  bool _notifListener  = false;
   final _ipCtrl = TextEditingController();
 
   @override
@@ -42,13 +43,15 @@ class _AndroidMainScreenState extends State<AndroidMainScreen> {
   }
 
   Future<void> _checkPermissions() async {
-    final sms   = await Permission.sms.isGranted;
-    final phone = await Permission.phone.isGranted;
-    final notif = await Permission.notification.isGranted;
+    final sms    = await Permission.sms.isGranted;
+    final phone  = await Permission.phone.isGranted;
+    final notif  = await Permission.notification.isGranted;
+    final listen = await AndroidBridgeService.instance.isNotificationListenerEnabled();
     setState(() {
-      _smsGranted   = sms;
-      _callsGranted = phone;
-      _notifGranted = notif;
+      _smsGranted    = sms;
+      _callsGranted  = phone;
+      _notifGranted  = notif;
+      _notifListener = listen;
     });
   }
 
@@ -108,11 +111,22 @@ class _AndroidMainScreenState extends State<AndroidMainScreen> {
 
               // Разрешения
               _PermissionsCard(
-                smsGranted:   _smsGranted,
-                callsGranted: _callsGranted,
-                notifGranted: _notifGranted,
-                onRequest:    _requestAll,
+                smsGranted:    _smsGranted,
+                callsGranted:  _callsGranted,
+                notifGranted:  _notifGranted,
+                notifListener: _notifListener,
+                onRequest:     _requestAll,
+                onOpenNotifSettings: () async {
+                  await AndroidBridgeService.instance.openNotificationSettings();
+                  await Future.delayed(const Duration(seconds: 1));
+                  _checkPermissions();
+                },
               ),
+
+              const SizedBox(height: 16),
+
+              // Буфер обмена
+              _ClipboardCard(),
 
               const SizedBox(height: 16),
 
@@ -197,14 +211,17 @@ class _PermissionsCard extends StatelessWidget {
     required this.smsGranted,
     required this.callsGranted,
     required this.notifGranted,
+    required this.notifListener,
     required this.onRequest,
+    required this.onOpenNotifSettings,
   });
-  final bool smsGranted, callsGranted, notifGranted;
+  final bool smsGranted, callsGranted, notifGranted, notifListener;
   final VoidCallback onRequest;
+  final VoidCallback onOpenNotifSettings;
 
   @override
   Widget build(BuildContext context) {
-    final allGranted = smsGranted && callsGranted && notifGranted;
+    final baseGranted = smsGranted && callsGranted && notifGranted;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -224,7 +241,9 @@ class _PermissionsCard extends StatelessWidget {
               desc: 'Caller ID и история'),
           _PermRow(label: 'Уведомления', granted: notifGranted,
               desc: 'Зеркалить на Mac'),
-          if (!allGranted) ...[
+          _PermRow(label: 'Слушатель уведомлений', granted: notifListener,
+              desc: 'Все уведомления → Mac'),
+          if (!baseGranted) ...[
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
@@ -237,6 +256,22 @@ class _PermissionsCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(10)),
                 ),
                 child: const Text('Разрешить всё'),
+              ),
+            ),
+          ],
+          if (!notifListener) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: onOpenNotifSettings,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppTheme.accent,
+                  side: const BorderSide(color: AppTheme.accent),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                child: const Text('Открыть настройки уведомлений'),
               ),
             ),
           ],
@@ -270,6 +305,47 @@ class _PermRow extends StatelessWidget {
           Text(desc, style: const TextStyle(
               fontSize: 11, color: AppTheme.textSecondary)),
         ]),
+      ]),
+    );
+  }
+}
+
+// ── Буфер обмена ──────────────────────────────────────────────────────────
+class _ClipboardCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface, borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(children: [
+        const Icon(CupertinoIcons.doc_on_clipboard_fill,
+            color: AppTheme.accent, size: 28),
+        const SizedBox(width: 14),
+        const Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Буфер обмена',
+                  style: TextStyle(fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary, fontSize: 15)),
+              Text('Отправить скопированный текст на Mac',
+                  style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+            ],
+          ),
+        ),
+        ElevatedButton(
+          onPressed: () => AndroidBridgeService.instance.pushClipboardToMac(),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.accent,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          ),
+          child: const Text('Отправить'),
+        ),
       ]),
     );
   }

@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 import 'core/theme/app_theme.dart';
 import 'core/constants/app_constants.dart';
 import 'features/bridge/services/bridge_service.dart';
+import 'features/android/android_bridge_service.dart';
 import 'features/messages/screens/mac_main_window.dart';
 import 'features/android/android_app.dart';
 
@@ -33,6 +34,10 @@ Future<void> main() async {
   }
 
   await BridgeService.instance.init();
+
+  if (!Platform.isMacOS) {
+    AndroidBridgeService.instance.start();
+  }
 
   runApp(Platform.isMacOS ? const _MacApp() : const AndroidApp());
 }

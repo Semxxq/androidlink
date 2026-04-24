@@ -140,15 +140,34 @@ class BridgeService {
       _udpBroadcastSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
       _udpBroadcastSocket!.broadcastEnabled = true;
       final msg = utf8.encode('ANDROIDLINK:$_localIp:${AL.wsPort}');
+
+      // Compute subnet broadcast (assume /24: 192.168.x.255)
+      final subnetBroadcast = _subnetBroadcast(_localIp!);
+
       _broadcastTimer = Timer.periodic(const Duration(seconds: 2), (_) {
         try {
+          // Send to both 255.255.255.255 and subnet broadcast
           _udpBroadcastSocket?.send(
               msg, InternetAddress('255.255.255.255'), AL.udpPort);
+          if (subnetBroadcast != null) {
+            _udpBroadcastSocket?.send(
+                msg, InternetAddress(subnetBroadcast), AL.udpPort);
+          }
         } catch (_) {}
       });
-      _log.i('UDP broadcast started for $_localIp');
+      _log.i('UDP broadcast started: $_localIp → $subnetBroadcast');
     } catch (e) {
       _log.e('UDP broadcast failed: $e');
+    }
+  }
+
+  String? _subnetBroadcast(String ip) {
+    try {
+      final parts = ip.split('.');
+      if (parts.length != 4) return null;
+      return '${parts[0]}.${parts[1]}.${parts[2]}.255';
+    } catch (_) {
+      return null;
     }
   }
 
