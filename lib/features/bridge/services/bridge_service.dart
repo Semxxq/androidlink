@@ -2,9 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:logger/logger.dart';
-import 'package:multicast_dns/multicast_dns.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:uuid/uuid.dart';
@@ -38,103 +36,168 @@ class BridgeMessage {
       });
 }
 
-/// Главный сервис связи Android ↔ Mac по локальной WiFi сети.
-///
-/// Mac запускает WebSocket сервер на порту 41234.
-/// Android находит Mac через mDNS и подключается.
-/// Всё работает без интернета — только WiFi.
+/// Mac запускает WebSocket-сервер и рассылает UDP-beacon каждые 2 сек.
+/// Android слушает UDP, находит IP мака, подключается по WebSocket.
+/// Несколько Android-устройств могут подключаться одновременно.
 class BridgeService {
   BridgeService._();
   static final BridgeService instance = BridgeService._();
 
   final _log     = Logger();
-  final _storage = const FlutterSecureStorage();
   final _uuid    = const Uuid();
   final _netInfo = NetworkInfo();
 
-  final _statusStream  = BehaviorSubject<BridgeStatus>.seeded(BridgeStatus.disconnected);
-  final _messageStream = StreamController<BridgeMessage>.broadcast();
+  final _statusStream          = BehaviorSubject<BridgeStatus>.seeded(BridgeStatus.disconnected);
+  final _messageStream         = StreamController<BridgeMessage>.broadcast();
+  final _connectedDevicesCount = BehaviorSubject<int>.seeded(0);
 
-  Stream<BridgeStatus>  get status        => _statusStream.stream;
-  Stream<BridgeMessage> get messages      => _messageStream.stream;
-  BridgeStatus          get currentStatus => _statusStream.value;
-  bool                  get isConnected   => currentStatus == BridgeStatus.connected;
+  Stream<BridgeStatus>  get status           => _statusStream.stream;
+  Stream<BridgeMessage> get messages         => _messageStream.stream;
+  Stream<int>           get deviceCount      => _connectedDevicesCount.stream;
+  BridgeStatus          get currentStatus    => _statusStream.value;
+  bool                  get isConnected      => currentStatus == BridgeStatus.connected;
+  String?               get localIp          => _localIp;
 
+  /// QR-данные для отображения на Маке: androidlink://IP:PORT
+  String? get qrData =>
+      _localIp != null ? 'androidlink://$_localIp:${AL.wsPort}' : null;
+
+  // Mac: список подключённых клиентов
+  final List<WebSocket> _clients = [];
+  HttpServer?           _wsServer;
+  RawDatagramSocket?    _udpBroadcastSocket;
+  Timer?                _broadcastTimer;
+
+  // Android: одно соединение с Маком
   WebSocketChannel? _channel;
-  HttpServer?       _wsServer;
   Timer?            _heartbeatTimer;
   Timer?            _reconnectTimer;
+  RawDatagramSocket? _udpListenSocket;
   String?           _lastMacIp;
+  String?           _localIp;
 
   Future<void> init() async {
+    _localIp = await _netInfo.getWifiIP();
     final isMac = defaultTargetPlatform == TargetPlatform.macOS;
     if (isMac) {
       await _startServer();
+      _startUdpBroadcast();
     } else {
-      _searchForMac();
+      _listenForMacUdp();
     }
   }
 
-  // ══ MAC: сервер ════════════════════════════════════════════════════════
+  // ══ MAC: WebSocket сервер ══════════════════════════════════════════════
 
   Future<void> _startServer() async {
     try {
       _wsServer = await HttpServer.bind(InternetAddress.anyIPv4, AL.wsPort);
       _statusStream.add(BridgeStatus.searching);
-      _log.i('Server ready on :${AL.wsPort}');
+      _log.i('WS server ready on :${AL.wsPort}');
 
       _wsServer!.transform(WebSocketTransformer()).listen((ws) {
-        _log.i('Android connected!');
-        _channel = IOWebSocketChannel(ws);
+        _clients.add(ws);
+        _connectedDevicesCount.add(_clients.length);
         _statusStream.add(BridgeStatus.connected);
-        _startListening();
-        _startHeartbeat();
+        _log.i('Android connected. Total: ${_clients.length}');
+
+        ws.listen(
+          (raw) {
+            if (raw is! String) return;
+            try {
+              final msg = BridgeMessage.fromJson(raw);
+              if (msg.type == AL.typePing) {
+                ws.add(BridgeMessage(type: AL.typePong, payload: {}).toJson());
+                return;
+              }
+              _messageStream.add(msg);
+            } catch (e) {
+              _log.e('Parse error', error: e);
+            }
+          },
+          onDone: () => _removeClient(ws),
+          onError: (_) => _removeClient(ws),
+          cancelOnError: true,
+        );
       });
     } catch (e) {
       _log.e('Server start failed', error: e);
     }
   }
 
-  Future<String?> get localIp => _netInfo.getWifiIP();
-
-  // ══ ANDROID: поиск Mac ════════════════════════════════════════════════
-
-  void _searchForMac() {
-    _statusStream.add(BridgeStatus.searching);
-    _discoverViaMdns();
+  void _removeClient(WebSocket ws) {
+    _clients.remove(ws);
+    _connectedDevicesCount.add(_clients.length);
+    if (_clients.isEmpty) _statusStream.add(BridgeStatus.searching);
+    _log.w('Android disconnected. Remaining: ${_clients.length}');
   }
 
-  Future<void> _discoverViaMdns() async {
-    final client = MDnsClient();
-    await client.start();
+  // ══ MAC: UDP beacon ════════════════════════════════════════════════════
 
+  void _startUdpBroadcast() async {
+    if (_localIp == null) return;
     try {
-      await for (final ptr in client.lookup<PtrResourceRecord>(
-        ResourceRecordQuery.serverPointer(AL.mdnsServiceType),
-      ).timeout(const Duration(seconds: 5), onTimeout: (_) {}) ) {
-        await for (final srv in client.lookup<SrvResourceRecord>(
-          ResourceRecordQuery.service(ptr.domainName),
-        )) {
-          await for (final ip in client.lookup<IPAddressResourceRecord>(
-            ResourceRecordQuery.addressIPv4(srv.target),
-          )) {
-            client.stop();
-            _connectToMac(ip.address.address);
-            return;
-          }
-        }
-      }
-    } catch (_) {}
+      _udpBroadcastSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      _udpBroadcastSocket!.broadcastEnabled = true;
+      final msg = utf8.encode('ANDROIDLINK:$_localIp:${AL.wsPort}');
+      _broadcastTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+        try {
+          _udpBroadcastSocket?.send(
+              msg, InternetAddress('255.255.255.255'), AL.udpPort);
+        } catch (_) {}
+      });
+      _log.i('UDP broadcast started for $_localIp');
+    } catch (e) {
+      _log.e('UDP broadcast failed: $e');
+    }
+  }
 
-    client.stop();
-    // mDNS не нашёл — попробуем снова через 5 сек
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 5), _searchForMac);
+  // ══ ANDROID: UDP listener ══════════════════════════════════════════════
+
+  Future<void> _listenForMacUdp() async {
+    _statusStream.add(BridgeStatus.searching);
+    try {
+      _udpListenSocket?.close();
+      _udpListenSocket = await RawDatagramSocket.bind(
+          InternetAddress.anyIPv4, AL.udpPort);
+      _log.i('Listening for Mac on UDP :${AL.udpPort}');
+
+      _udpListenSocket!.listen((event) {
+        if (event != RawSocketEvent.read) return;
+        final dg = _udpListenSocket?.receive();
+        if (dg == null) return;
+        final msg = utf8.decode(dg.data);
+        if (!msg.startsWith('ANDROIDLINK:')) return;
+        final parts = msg.split(':');
+        if (parts.length < 3) return;
+        final ip = parts[1];
+        _log.i('Found Mac at $ip via UDP beacon');
+        _udpListenSocket?.close();
+        _udpListenSocket = null;
+        _connectToMac(ip);
+      });
+    } catch (e) {
+      _log.e('UDP listen failed: $e');
+      _reconnectTimer?.cancel();
+      _reconnectTimer =
+          Timer(const Duration(seconds: 5), _listenForMacUdp);
+    }
   }
 
   Future<void> connectToMacDirectly(String ip) async {
     _lastMacIp = ip;
+    _udpListenSocket?.close();
+    _udpListenSocket = null;
     _connectToMac(ip);
+  }
+
+  /// Подключение через QR: данные вида "androidlink://192.168.x.x:41234"
+  Future<void> connectViaQr(String qrValue) async {
+    final uri = Uri.tryParse(qrValue);
+    if (uri == null || uri.scheme != 'androidlink') return;
+    final ip = uri.host;
+    if (ip.isEmpty) return;
+    connectToMacDirectly(ip);
   }
 
   Future<void> _connectToMac(String ip) async {
@@ -152,14 +215,19 @@ class BridgeService {
     } catch (e) {
       _log.e('Connection failed: $e');
       _statusStream.add(BridgeStatus.disconnected);
-      _reconnectTimer?.cancel();
-      _reconnectTimer = Timer(
-        const Duration(seconds: 5),
-        () => _lastMacIp != null
-            ? _connectToMac(_lastMacIp!)
-            : _searchForMac(),
-      );
+      _scheduleReconnect();
     }
+  }
+
+  void _scheduleReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(const Duration(seconds: 5), () {
+      if (_lastMacIp != null) {
+        _connectToMac(_lastMacIp!);
+      } else {
+        _listenForMacUdp();
+      }
+    });
   }
 
   // ══ Общее ════════════════════════════════════════════════════════════
@@ -182,25 +250,26 @@ class BridgeService {
   }
 
   void send(BridgeMessage message) {
-    if (!isConnected) return;
-    _channel?.sink.add(message.toJson());
+    final isMac = defaultTargetPlatform == TargetPlatform.macOS;
+    if (isMac) {
+      final json = message.toJson();
+      for (final ws in List.of(_clients)) {
+        try { ws.add(json); } catch (_) {}
+      }
+    } else {
+      if (!isConnected) return;
+      _channel?.sink.add(message.toJson());
+    }
   }
 
-  void sendRaw(Map<String, dynamic> payload, String type) {
-    send(BridgeMessage(type: type, payload: payload, id: _uuid.v4()));
-  }
+  void sendRaw(Map<String, dynamic> payload, String type) =>
+      send(BridgeMessage(type: type, payload: payload, id: _uuid.v4()));
 
   void _onDisconnected() {
-    _log.w('Disconnected');
+    _log.w('Disconnected from Mac');
     _statusStream.add(BridgeStatus.disconnected);
     _heartbeatTimer?.cancel();
-
-    final isMac = defaultTargetPlatform == TargetPlatform.macOS;
-    if (!isMac) {
-      _reconnectTimer?.cancel();
-      _reconnectTimer = Timer(const Duration(seconds: 3),
-          () => _lastMacIp != null ? _connectToMac(_lastMacIp!) : _searchForMac());
-    }
+    _scheduleReconnect();
   }
 
   void _startHeartbeat() {
@@ -213,8 +282,15 @@ class BridgeService {
   void disconnect() {
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
+    _broadcastTimer?.cancel();
+    _udpBroadcastSocket?.close();
+    _udpListenSocket?.close();
     _channel?.sink.close();
     _channel = null;
+    for (final ws in List.of(_clients)) {
+      try { ws.close(); } catch (_) {}
+    }
+    _clients.clear();
     _statusStream.add(BridgeStatus.disconnected);
   }
 }

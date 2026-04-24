@@ -3,8 +3,7 @@ class AL {
 
   // ── Bridge (локальная сеть) ───────────────────────────────────────────
   static const int    wsPort          = 41234;
-  static const String mdnsServiceType = '_androidlink._tcp';
-  static const String mdnsName        = 'AndroidLink';
+  static const int    udpPort         = 41235;
   static const Duration wsTimeout     = Duration(seconds: 10);
   static const Duration heartbeat     = Duration(seconds: 5);
 

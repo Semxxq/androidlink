@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../bridge/services/bridge_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -114,6 +115,11 @@ class _AndroidMainScreenState extends State<AndroidMainScreen> {
               ),
 
               const SizedBox(height: 16),
+
+              // QR-сканер
+              _QrScanCard(),
+
+              const SizedBox(height: 4),
 
               // Ручной ввод IP
               _ManualIpCard(
@@ -264,6 +270,111 @@ class _PermRow extends StatelessWidget {
           Text(desc, style: const TextStyle(
               fontSize: 11, color: AppTheme.textSecondary)),
         ]),
+      ]),
+    );
+  }
+}
+
+// ── QR сканер ─────────────────────────────────────────────────────────────
+class _QrScanCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.accent.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.accent.withOpacity(0.3)),
+      ),
+      child: Row(children: [
+        const Icon(CupertinoIcons.qrcode_viewfinder,
+            color: AppTheme.accent, size: 36),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Text('Сканировать QR',
+                  style: TextStyle(fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary, fontSize: 15)),
+              Text('Открой AndroidLink на Маке и наведи камеру на QR-код',
+                  style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+            ],
+          ),
+        ),
+        ElevatedButton(
+          onPressed: () => _openScanner(context),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.accent,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          ),
+          child: const Text('Скан'),
+        ),
+      ]),
+    );
+  }
+
+  void _openScanner(BuildContext context) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => const _QrScanScreen(),
+    ));
+  }
+}
+
+class _QrScanScreen extends StatefulWidget {
+  const _QrScanScreen();
+  @override
+  State<_QrScanScreen> createState() => _QrScanScreenState();
+}
+
+class _QrScanScreenState extends State<_QrScanScreen> {
+  bool _scanned = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('Сканируй QR на Маке'),
+      ),
+      body: Stack(children: [
+        MobileScanner(
+          onDetect: (capture) {
+            if (_scanned) return;
+            final val = capture.barcodes.firstOrNull?.rawValue;
+            if (val == null) return;
+            if (!val.startsWith('androidlink://')) return;
+            _scanned = true;
+            BridgeService.instance.connectViaQr(val);
+            Navigator.of(context).pop();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Подключаемся к Mac...')),
+            );
+          },
+        ),
+        // Прицел
+        Center(
+          child: Container(
+            width: 220, height: 220,
+            decoration: BoxDecoration(
+              border: Border.all(color: AppTheme.accent, width: 2),
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: 40, left: 0, right: 0,
+          child: const Text(
+            'Наведи на QR-код в AndroidLink на Маке',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+        ),
       ]),
     );
   }

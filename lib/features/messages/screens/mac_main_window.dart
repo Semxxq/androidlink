@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:macos_ui/macos_ui.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../calls/screens/calls_screen.dart';
 import '../../clipboard/clipboard_screen.dart';
@@ -42,14 +43,144 @@ class _MacMainWindowState extends State<MacMainWindow> {
         ),
         bottom: const _StatusBar(),
       ),
-      child: IndexedStack(
-        index: _index,
-        children: const [
-          MessagesScreen(),
-          CallsScreen(),
-          NotificationsScreen(),
-          FilesScreen(),
-          ClipboardScreen(),
+      child: StreamBuilder<BridgeStatus>(
+        stream:      BridgeService.instance.status,
+        initialData: BridgeService.instance.currentStatus,
+        builder: (_, snap) {
+          final status = snap.data ?? BridgeStatus.disconnected;
+          if (status == BridgeStatus.connected) {
+            return IndexedStack(
+              index: _index,
+              children: const [
+                MessagesScreen(),
+                CallsScreen(),
+                NotificationsScreen(),
+                FilesScreen(),
+                ClipboardScreen(),
+              ],
+            );
+          }
+          return const _WaitingScreen();
+        },
+      ),
+    );
+  }
+}
+
+// ── Экран ожидания с QR-кодом ─────────────────────────────────────────────
+class _WaitingScreen extends StatelessWidget {
+  const _WaitingScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Иконка
+          Container(
+            width: 64, height: 64,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [AppTheme.accent, AppTheme.accentGreen],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: const Icon(Icons.android, color: Colors.white, size: 32),
+          ).animate().scale(duration: 400.ms, curve: Curves.easeOutBack),
+
+          const SizedBox(height: 24),
+
+          const Text(
+            'Подключи Android',
+            style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: AppTheme.textPrimary,
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          const Text(
+            'Сканируй QR-код в приложении AndroidLink на телефоне',
+            style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
+          ),
+
+          const SizedBox(height: 32),
+
+          // QR-код
+          StreamBuilder<String?>(
+            stream: Stream.value(BridgeService.instance.qrData),
+            builder: (_, snap) {
+              final qr = BridgeService.instance.qrData;
+              if (qr == null) {
+                return const Text(
+                  'Подключись к WiFi для отображения QR',
+                  style: TextStyle(color: AppTheme.textSecondary),
+                );
+              }
+              return Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: QrImageView(
+                      data:            qr,
+                      version:         QrVersions.auto,
+                      size:            200,
+                      backgroundColor: Colors.white,
+                    ),
+                  ).animate().fadeIn(duration: 300.ms),
+                  const SizedBox(height: 16),
+                  Text(
+                    BridgeService.instance.localIp ?? '',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppTheme.textSecondary,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+
+          const SizedBox(height: 32),
+
+          // Инструкция
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Как подключить',
+                    style: TextStyle(fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimary, fontSize: 13)),
+                const SizedBox(height: 8),
+                ...[
+                  '1. Установи AndroidLink на телефон',
+                  '2. Подключи оба устройства к одному WiFi',
+                  '3. Нажми "Сканировать QR" в приложении',
+                  '4. Наведи камеру на этот код',
+                ].map((s) => Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(s,
+                      style: const TextStyle(
+                          fontSize: 12, color: AppTheme.textSecondary)),
+                )),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -72,7 +203,6 @@ class _SidebarContent extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Лого
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
           child: Row(children: [
@@ -97,7 +227,6 @@ class _SidebarContent extends StatelessWidget {
           ]),
         ),
 
-        // Nav items
         ...items.asMap().entries.map((e) {
           final isSelected = e.key == index;
           return GestureDetector(
@@ -138,25 +267,32 @@ class _StatusBar extends StatelessWidget {
       initialData: BridgeService.instance.currentStatus,
       builder: (_, snap) {
         final s = snap.data ?? BridgeStatus.disconnected;
-        final (label, color) = switch (s) {
-          BridgeStatus.connected    => ('Android подключён', AppTheme.accentGreen),
-          BridgeStatus.connecting   => ('Подключение...', AppTheme.accentOrange),
-          BridgeStatus.searching    => ('Ожидание...', AppTheme.accent),
-          BridgeStatus.disconnected => ('Не подключено', AppTheme.textSecondary),
-        };
-        return Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(children: [
-            Container(
-              width: 7, height: 7,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            ).animate(
-              onPlay: s == BridgeStatus.searching ? (c) => c.repeat() : null,
-            ).fadeOut(duration: const Duration(milliseconds: 700))
-             .then().fadeIn(duration: const Duration(milliseconds: 700)),
-            const SizedBox(width: 8),
-            Text(label, style: TextStyle(fontSize: 12, color: color)),
-          ]),
+        return StreamBuilder<int>(
+          stream:      BridgeService.instance.deviceCount,
+          initialData: 0,
+          builder: (_, countSnap) {
+            final count = countSnap.data ?? 0;
+            final (label, color) = switch (s) {
+              BridgeStatus.connected    => ('$count устр. подключено', AppTheme.accentGreen),
+              BridgeStatus.connecting   => ('Подключение...', AppTheme.accentOrange),
+              BridgeStatus.searching    => ('Ожидание...', AppTheme.accent),
+              BridgeStatus.disconnected => ('Не подключено', AppTheme.textSecondary),
+            };
+            return Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(children: [
+                Container(
+                  width: 7, height: 7,
+                  decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                ).animate(
+                  onPlay: s == BridgeStatus.searching ? (c) => c.repeat() : null,
+                ).fadeOut(duration: const Duration(milliseconds: 700))
+                 .then().fadeIn(duration: const Duration(milliseconds: 700)),
+                const SizedBox(width: 8),
+                Text(label, style: TextStyle(fontSize: 12, color: color)),
+              ]),
+            );
+          },
         );
       },
     );
