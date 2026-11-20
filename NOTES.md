@@ -31,5 +31,6 @@
 - Синк: 1437 SMS, 510 контактов. Звонки=0 чинено в 6b5e24d (CallLog отвергал LIMIT в sortOrder), ждёт проверки на телефоне.
 - Юзер подтвердил: всё работает. Был обрыв 1002 в 16:09 (причина не выяснена, логирование ошибок добавлено, Mac не переустановлен).
 - Ф3 картинки в буфере (91c8b92): Mac — Swift методы clipCount/clipImage/setClipImage в канале androidlink/tray, store поллит changeCount; тип `clip_image` {image: base64 JPEG ≤8МБ}. Android — ClipProvider (content://com.androidlink.clip), приём в LinkService, отправка через плитку ClipPushActivity. Ждёт теста.
+- Mac UI: «?» вместо иконок = не было cupertino_icons в pubspec (добавлен). Menubar — SwiftUI карточка PhoneCardView в AppDelegate.swift (батарея, SMS/уведомл./пропущ. за 24ч), данные из tray.dart.
 - Осталось: мерж ветки phase1-core-link в main (по ок юзера); Ф3: картинки в буфере, MMS/группы. Скриншоты недоступны (нет Screen Recording у терминала).
 - Обрыв 1002 повторяется ~раз в сессию, реконнект за 3с — некритично; причину смотреть по логу Android (adb заблокирован).
