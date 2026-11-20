@@ -123,5 +123,10 @@
             </intent-filter>
         </service>
 
+        <provider
+            android:name=".ClipProvider"
+            android:authorities="com.androidlink.clip"
+            android:exported="false"
+            android:grantUriPermissions="true"/>
     </application>
 </manifest>

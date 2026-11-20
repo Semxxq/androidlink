@@ -25,10 +25,21 @@ class ClipPushActivity : Activity() {
         if (!hasFocus || handled) return
         handled = true
         val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-        val text = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
-        val msg = if (text.isNullOrEmpty()) "Буфер обмена пуст" else {
-            LinkService.post(this, "clipboard", JSONObject().put("text", text))
-            "Буфер отправлен на Mac"
+        val item = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)
+        val mime = cm.primaryClipDescription?.takeIf { it.mimeTypeCount > 0 }?.getMimeType(0) ?: ""
+        val uri = item?.uri
+        val msg = if (uri != null && (mime.startsWith("image/") || contentResolver.getType(uri)?.startsWith("image/") == true)) {
+            val bytes = ClipProvider.readImage(this, uri)
+            if (bytes == null) "Не удалось прочитать изображение" else {
+                LinkService.post(this, "clip_image", JSONObject().put("image", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)))
+                "Изображение отправлено на Mac"
+            }
+        } else {
+            val text = item?.coerceToText(this)?.toString()
+            if (text.isNullOrEmpty()) "Буфер обмена пуст" else {
+                LinkService.post(this, "clipboard", JSONObject().put("text", text))
+                "Буфер отправлен на Mac"
+            }
         }
         Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
         finish()

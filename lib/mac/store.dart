@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -232,6 +233,13 @@ class MacStore extends ChangeNotifier {
         Clipboard.setData(ClipboardData(text: text));
         _addClip(text, true);
         if (p['shared'] == true) _toast('Текст с телефона скопирован');
+      case AL.typeClipImage:
+        final b64 = p['image'] as String? ?? '';
+        if (b64.isEmpty) break;
+        final bytes = base64Decode(b64);
+        _setClipImage(bytes);
+        _addClip('Изображение', true, image: bytes);
+        notifyListeners();
       case AL.typeCallResult:
         if (p['ok'] != true) {
           _toast(p['action'] == 'dial'
@@ -383,10 +391,44 @@ class MacStore extends ChangeNotifier {
 
   // ── clipboard ──
 
+  static const _native = MethodChannel('androidlink/tray');
+  int _clipCount = -1;
+  static const _maxImage = 8 * 1024 * 1024;
+
+  Future<void> _setClipImage(Uint8List bytes) async {
+    try {
+      _clipCount = await _native.invokeMethod<int>('setClipImage', bytes) ?? _clipCount;
+    } catch (_) {}
+  }
+
+  Future<Uint8List?> _readClipImage() async {
+    try {
+      return await _native.invokeMethod<Uint8List>('clipImage');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _sendImage(Uint8List img) => _b.sendRaw({'image': base64Encode(img)}, AL.typeClipImage, deviceId: device!.id);
+
   Future<void> _pollClipboard() async {
     try {
+      final count = await _native.invokeMethod<int>('clipCount').catchError((_) => -2);
+      if (count != null && count >= 0) {
+        if (count == _clipCount) return;
+        _clipCount = count;
+      }
       final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
-      if (text == null || text.isEmpty || text == _lastClip) return;
+      if (text == null || text.isEmpty) {
+        if (count == null || count < 0) return;
+        final img = await _readClipImage();
+        if (img == null || img.length > _maxImage) return;
+        _addClip('Изображение', false, image: img);
+        if (autoClipboard && connected) _sendImage(img);
+        notifyListeners();
+        return;
+      }
+      if (text == _lastClip) return;
       _lastClip = text;
       _addClip(text, false);
       if (autoClipboard && connected) {
@@ -396,17 +438,30 @@ class MacStore extends ChangeNotifier {
     } catch (_) {}
   }
 
-  void _addClip(String text, bool fromPhone) {
-    clipboard.removeWhere((c) => c.text == text);
-    clipboard.insert(0, ClipEntry(text, fromPhone));
+  void _addClip(String text, bool fromPhone, {Uint8List? image}) {
+    if (image == null) clipboard.removeWhere((c) => c.image == null && c.text == text);
+    clipboard.insert(0, ClipEntry(text, fromPhone, image: image));
     if (clipboard.length > 50) clipboard.removeLast();
   }
 
   Future<void> pushClipboard() async {
+    if (!connected) return;
     final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
-    if (text == null || text.isEmpty || !connected) return;
+    if (text == null || text.isEmpty) {
+      final img = await _readClipImage();
+      if (img == null || img.length > _maxImage) return;
+      _sendImage(img);
+      _toast('Изображение отправлено на телефон');
+      return;
+    }
     _b.sendRaw({'text': text}, AL.typeClipboard, deviceId: device!.id);
     _toast('Буфер отправлен на телефон');
+  }
+
+  Future<void> copyEntry(ClipEntry c) async {
+    if (c.image == null) return copy(c.text);
+    await _setClipImage(c.image!);
+    if (autoClipboard && connected) _sendImage(c.image!);
   }
 
   Future<void> copy(String text) async {

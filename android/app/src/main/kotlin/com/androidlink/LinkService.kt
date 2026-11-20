@@ -409,6 +409,16 @@ class LinkService : Service() {
                     cm.setPrimaryClip(ClipData.newPlainText("AndroidLink", text))
                 }
             }
+            "clip_image" -> {
+                val bytes = try { android.util.Base64.decode(p.optString("image"), android.util.Base64.DEFAULT) } catch (e: Exception) { null }
+                if (bytes != null && bytes.isNotEmpty()) {
+                    val uri = ClipProvider.store(this, bytes)
+                    main.post {
+                        val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newUri(contentResolver, "AndroidLink", uri))
+                    }
+                }
+            }
         }
     }
 

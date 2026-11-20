@@ -34,6 +34,7 @@ class AL {
 
   // both ways
   static const String typeClipboard = 'clipboard';
+  static const String typeClipImage = 'clip_image';
   static const String typeFileOffer = 'file_offer';
   static const String typeFileChunk = 'file_chunk';
   static const String typeFileAck = 'file_ack';

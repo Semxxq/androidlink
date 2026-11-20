@@ -62,9 +62,14 @@ class ClipboardPage extends StatelessWidget {
                         for (final c in s.clipboard)
                           HoverTile(
                             radius: 0,
-                            onTap: () => s.copy(c.text),
+                            onTap: () => s.copyEntry(c),
                             child: Row2(
-                              leading: MacosIcon(
+                              leading: c.image != null
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: Image.memory(c.image!, width: 48, height: 48, fit: BoxFit.cover, gaplessPlayback: true),
+                                    )
+                                  : MacosIcon(
                                 c.fromPhone ? CupertinoIcons.device_phone_portrait : CupertinoIcons.desktopcomputer,
                                 size: 16,
                                 color: p.secondary,

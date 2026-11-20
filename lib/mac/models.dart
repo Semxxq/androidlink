@@ -1,6 +1,8 @@
 /// Data the Mac keeps about the phone. JSON round-trip for local history.
 library;
 
+import 'dart:typed_data';
+
 String normalizeNumber(String raw) {
   final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
   if (digits.isEmpty) return raw.trim().toLowerCase(); // alphanumeric senders
@@ -131,8 +133,9 @@ class PhoneNotif {
 }
 
 class ClipEntry {
-  ClipEntry(this.text, this.fromPhone) : time = DateTime.now();
+  ClipEntry(this.text, this.fromPhone, {this.image}) : time = DateTime.now();
   final String text;
+  final Uint8List? image;
   final bool fromPhone;
   final DateTime time;
 }

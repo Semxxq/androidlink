@@ -36,6 +36,24 @@ final class StatusBarController: NSObject {
     let ch = FlutterMethodChannel(name: "androidlink/tray", binaryMessenger: messenger)
     ch.setMethodCallHandler { [weak self] call, result in
       guard let self else { return }
+      let pb = NSPasteboard.general
+      switch call.method {
+      case "clipCount":
+        result(pb.changeCount); return
+      case "clipImage":
+        // Image only when there is no text (avoid hijacking rich-text copies).
+        if pb.string(forType: .string) != nil { result(nil); return }
+        guard let img = NSImage(pasteboard: pb), let tiff = img.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff) else { result(nil); return }
+        let jpg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85])
+        result(jpg.map { FlutterStandardTypedData(bytes: $0) }); return
+      case "setClipImage":
+        if let d = (call.arguments as? FlutterStandardTypedData)?.data, let img = NSImage(data: d) {
+          pb.clearContents(); pb.writeObjects([img])
+        }
+        result(pb.changeCount); return
+      default: break
+      }
       if call.method == "update", let a = call.arguments as? [String: Any] {
         self.update(connected: a["connected"] as? Bool ?? false,
                     title: a["title"] as? String ?? "",
