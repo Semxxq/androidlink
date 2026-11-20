@@ -214,10 +214,10 @@ class _SidebarActions extends StatelessWidget {
             controlSize: ControlSize.regular,
             secondary: true,
             onPressed: s.connected ? s.ring : null,
-            child: const Row(mainAxisSize: MainAxisSize.min, children: [
-              MacosIcon(CupertinoIcons.speaker_3_fill, size: 13),
-              SizedBox(width: 6),
-              Text('Найти телефон'),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              MacosIcon(s.ringing ? CupertinoIcons.stop_fill : CupertinoIcons.speaker_3_fill, size: 13),
+              const SizedBox(width: 6),
+              Text(s.ringing ? 'Остановить звук' : 'Найти телефон'),
             ]),
           ),
         ),

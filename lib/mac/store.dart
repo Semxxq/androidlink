@@ -527,14 +527,28 @@ class MacStore extends ChangeNotifier {
     _toast('Звоним с телефона: ${displayName(number)}');
   }
 
+  bool ringing = false;
+  Timer? _ringTimer;
+
   void ring() {
     if (!connected) return;
+    if (ringing) return stopRing();
     _b.sendRaw({'seconds': 30}, AL.typeRing, deviceId: device!.id);
-    _toast('Телефон звонит — он затихнет, когда ты откроешь AndroidLink');
+    ringing = true;
+    _ringTimer?.cancel();
+    _ringTimer = Timer(const Duration(seconds: 30), () {
+      ringing = false;
+      notifyListeners();
+    });
+    _toast('Телефон звонит 30 секунд');
+    notifyListeners();
   }
 
   void stopRing() {
+    _ringTimer?.cancel();
+    ringing = false;
     if (connected) _b.sendRaw({}, AL.typeRingStop, deviceId: device!.id);
+    notifyListeners();
   }
 
   void dismissNotification(String key) {
