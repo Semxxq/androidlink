@@ -21,7 +21,7 @@
 - Android: связь в нативном `LinkService.kt` (foreground connectedDevice, OkHttp, автореконнект+маяк+NetworkCallback, очередь 300, батарея). SMS/звонки/уведомления — manifest-ресиверы → LinkService.post. Flutter ↔ через `com.androidlink/methods` + EventChannel `com.androidlink/link`. SMS reply чинён (+sms_status ack).
 - Mac: `bridge_service.dart` — _MacHost (pairing.json в AppSupport, мульти-девайс, PeerInfo), _PhoneLink (Android-прокси).
 - Платформы перегенерены Flutter 3.50.1 (gradle .kts, macos проект, target 12.0). CI: analyze+test+apk+macos на любой push.
-- Ветка `phase1-core-link` запушена. Локально всё есть: Flutter 3.50.1, Android SDK (/opt/homebrew/share/android-commandlinetools, compileSdk 37), Xcode, CocoaPods. APK и macOS .app собираются локально.
+- Ветка phase1-core-link влита в main (PR #1). Репо ПУБЛИЧНОЕ, релиз v1.0.0 (APK + AndroidLink-mac.zip, не нотаризован). Локально всё есть: Flutter 3.50.1, Android SDK (/opt/homebrew/share/android-commandlinetools, compileSdk 37), Xcode, CocoaPods. APK и macOS .app собираются локально.
 - Пины: equatable ^2.0.7 (macos_ui 2.2.2), window_manager ^0.5.1 (0.7 ломает Linux-тесты), Podfile target 12.0.
 - Дизайн (выбор юзера): Mac — нативный macOS (как Messages: сайдбар с телефоном+батареей, системные шрифты, светлая/тёмная авто, menubar). Android — Material You (dynamic color, M3).
 - Ф2 сделано (коммит 5413467): Android — PhoneData.kt (sms/calls/contacts sync, SmsObserver по content://sms), PhoneControl.kt (answer/decline/dial, ring), FileTransfer.kt (чанки 192К, окно 24, ack/8), ShareActivity (share + буфер), ClipTileService, ответ на уведомления через RemoteInput. Mac — lib/mac/: store.dart (MacStore, history.json), notifier.dart (баннеры с действиями), tray.dart + AppDelegate.swift (menubar), ui/*. Android UI — lib/android/ (M3, seed из system_accent1_500).
@@ -35,5 +35,6 @@
 - MMS/группы: Android Mms.kt (content://mms, превью JPEG ≤640px base64, sender, names; observer content://mms-sms/), MMS идут в sms_batch (до 300). Mac: threadKey() — группа = "g:"+отсорт. номера, address "a,b,c"; ответ в группу = SMS каждому по отдельности (не групповой MMS). Ждёт теста.
 - Файлы Mac: open/reveal через NSWorkspace (канал tray: openFile/reveal; Process open в sandbox не работает), история передач в AppSupport/transfers.json (200).
 - Найти телефон: PhoneControl.ring — перебор URI мелодий, вибрация, уведомление-будильник (Нашёл → MainActivity стопит); Mac кнопка = стоп при повторе.
-- Осталось: мерж ветки phase1-core-link в main (по ок юзера); Ф3: картинки в буфере, MMS/группы. Скриншоты недоступны (нет Screen Recording у терминала).
+- Mac сайдбар: const _DeviceHeader/_SidebarActions не перерисовывались → свой ListenableBuilder.
+- Осталось: Ф3: картинки в буфере, MMS/группы. Скриншоты недоступны (нет Screen Recording у терминала).
 - Обрыв 1002 повторяется ~раз в сессию, реконнект за 3с — некритично; причину смотреть по логу Android (adb заблокирован).
