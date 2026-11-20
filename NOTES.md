@@ -24,5 +24,7 @@
 - Ветка `phase1-core-link` запушена. Локально всё есть: Flutter 3.50.1, Android SDK (/opt/homebrew/share/android-commandlinetools, compileSdk 37), Xcode, CocoaPods. APK и macOS .app собираются локально.
 - Пины: equatable ^2.0.7 (macos_ui 2.2.2), window_manager ^0.5.1 (0.7 ломает Linux-тесты), Podfile target 12.0.
 - Дизайн (выбор юзера): Mac — нативный macOS (как Messages: сайдбар с телефоном+батареей, системные шрифты, светлая/тёмная авто, menubar). Android — Material You (dynamic color, M3).
-- Mac-приложение установлено в /Applications/AndroidLink.app. Телефон по adb не подключён.
-- Осталось: зелёный CI → тест на телефоне → Ф2 (+редизайн).
+- Ф2 сделано (коммит 5413467): Android — PhoneData.kt (sms/calls/contacts sync, SmsObserver по content://sms), PhoneControl.kt (answer/decline/dial, ring), FileTransfer.kt (чанки 192К, окно 24, ack/8), ShareActivity (share + буфер), ClipTileService, ответ на уведомления через RemoteInput. Mac — lib/mac/: store.dart (MacStore, history.json), notifier.dart (баннеры с действиями), tray.dart + AppDelegate.swift (menubar), ui/*. Android UI — lib/android/ (M3, seed из system_accent1_500).
+- Решения: dynamic_color убран (несовместим с material_ui), window_manager убран (окно через macos_window_utils + Swift), desugaring вкл. для flutter_local_notifications.
+- Не проверено на железе. Скриншоты недоступны (нет Screen Recording у терминала).
+- Осталось: тест на телефоне + фикс багов; Ф3: картинки в буфере, MMS, групповые чаты.

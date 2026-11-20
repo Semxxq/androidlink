@@ -1,7 +1,6 @@
 package com.androidlink
 
 import android.app.Activity
-import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -10,19 +9,11 @@ import android.widget.Toast
 import org.json.JSONObject
 
 /**
- * Invisible activity:
- *  - share sheet target ("Поделиться → AndroidLink"): text goes to the Mac
- *    clipboard, files are sent to ~/Downloads;
- *  - ACTION_PUSH_CLIPBOARD (notification button / quick tile): reads the phone
- *    clipboard (allowed only while an activity has focus) and sends it.
+ * Exported share-sheet target ("Поделиться → Отправить на Mac"): text goes to
+ * the Mac clipboard, files to ~/Downloads. Only content:// URIs from other
+ * apps are accepted — never file:// or our own provider (no confused deputy).
  */
 class ShareActivity : Activity() {
-
-    companion object {
-        const val ACTION_PUSH_CLIPBOARD = "com.androidlink.PUSH_CLIPBOARD"
-    }
-
-    private var handled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,22 +21,12 @@ class ShareActivity : Activity() {
             toast("Сначала подключи Mac в AndroidLink"); finish(); return
         }
         LinkService.start(this)
-        if (intent?.action != ACTION_PUSH_CLIPBOARD) { handleShare(); finish() }
-    }
-
-    override fun onWindowFocusChanged(hasFocus: Boolean) {
-        super.onWindowFocusChanged(hasFocus)
-        if (!hasFocus || handled || intent?.action != ACTION_PUSH_CLIPBOARD) return
-        handled = true
-        val cm = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
-        val text = cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
-        if (text.isNullOrEmpty()) toast("Буфер обмена пуст")
-        else {
-            LinkService.post(this, "clipboard", JSONObject().put("text", text))
-            toast("Буфер отправлен на Mac")
-        }
+        handleShare()
         finish()
     }
+
+    private fun isForeignContent(u: Uri): Boolean =
+        u.scheme == "content" && u.authority != null && !u.authority!!.startsWith(packageName)
 
     private fun handleShare() {
         val i = intent ?: return
@@ -54,6 +35,7 @@ class ShareActivity : Activity() {
             Intent.ACTION_SEND -> streamExtra(i)?.let { uris.add(it) }
             Intent.ACTION_SEND_MULTIPLE -> uris.addAll(streamListExtra(i))
         }
+        uris.retainAll { isForeignContent(it) }
         if (uris.isNotEmpty()) {
             val svc = LinkService.instance
             if (svc == null || LinkService.status != "connected") { toast("Mac не подключён"); return }

@@ -76,6 +76,14 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ClipPushActivity"
+            android:exported="false"
+            android:theme="@style/Transparent"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:noHistory="true"/>
+
         <service
             android:name=".ClipTileService"
             android:exported="true"

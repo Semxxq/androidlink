@@ -199,7 +199,7 @@ class LinkService : Service() {
         val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL_ID) else Notification.Builder(this)
         val clip = PendingIntent.getActivity(
             this, 2,
-            Intent(this, ShareActivity::class.java).setAction(ShareActivity.ACTION_PUSH_CLIPBOARD)
+            Intent(this, ClipPushActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
