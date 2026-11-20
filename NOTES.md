@@ -27,5 +27,7 @@
 - Ф2 сделано (коммит 5413467): Android — PhoneData.kt (sms/calls/contacts sync, SmsObserver по content://sms), PhoneControl.kt (answer/decline/dial, ring), FileTransfer.kt (чанки 192К, окно 24, ack/8), ShareActivity (share + буфер), ClipTileService, ответ на уведомления через RemoteInput. Mac — lib/mac/: store.dart (MacStore, history.json), notifier.dart (баннеры с действиями), tray.dart + AppDelegate.swift (menubar), ui/*. Android UI — lib/android/ (M3, seed из system_accent1_500).
 - Решения: dynamic_color убран (несовместим с material_ui), window_manager убран (окно через macos_window_utils + Swift), desugaring вкл. для flutter_local_notifications.
 - Подпись: android/app/release.jks + android/key.properties (в .gitignore, НЕ терять — иначе обновления только с удалением). Телефон Samsung: мешает «Автоблокировщик» (блокирует и установку, и adb).
-- Не проверено на железе. Скриншоты недоступны (нет Screen Recording у терминала).
+- 2026-11-20: СВЯЗЬ РАБОТАЕТ на Samsung SM-S947B (коммит c106217). Причины были: Dart отвечал permessage-deflate с client_max_window_bits → OkHttp рвал (compressionOff); маяк через VPN-маршрут (сокет на каждый LAN IP); macOS «Локальная сеть» (ad-hoc подпись сбрасывала → macos/install_local.sh с постоянной подписью). Лог Mac: ~/Library/Containers/com.androidlink.app/Data/Library/Application Support/com.androidlink.app/diag.log.
+- Синк: 1437 SMS, 510 контактов, 0 звонков (проверить разрешение журнала звонков).
+- Осталось: проверить звонки/уведомления/буфер/файлы на телефоне; поставить новый APK с Desktop (там диагностика). Скриншоты недоступны (нет Screen Recording у терминала).
 - Осталось: тест на телефоне + фикс багов; Ф3: картинки в буфере, MMS, групповые чаты.

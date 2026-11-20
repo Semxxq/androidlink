@@ -382,8 +382,8 @@ class _MacHost {
         if (peer == null) diag('closed before hello: code=${ws.closeCode} reason=${ws.closeReason}');
         done();
       },
-      onError: (Object e) {
-        diag('socket error: $e');
+      onError: (Object e, StackTrace st) {
+        diag('socket error (${peer?.info.name ?? 'before hello'}): $e');
         done();
       },
       cancelOnError: true,
