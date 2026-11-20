@@ -102,7 +102,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
   private func update(_ a: [String: Any]) {
     let connected = a["connected"] as? Bool ?? false
-    try? "\(Date()) \(a)\n".write(toFile: NSHomeDirectory() + "/Library/Application Support/com.androidlink.app/card.log", atomically: true, encoding: .utf8)
     item?.button?.image = NSImage(
       systemSymbolName: connected ? "iphone" : "iphone.slash", accessibilityDescription: "AndroidLink")
     card.connected = connected
