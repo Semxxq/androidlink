@@ -30,5 +30,6 @@
 - 2026-11-20: СВЯЗЬ РАБОТАЕТ на Samsung SM-S947B (коммит c106217). Причины были: Dart отвечал permessage-deflate с client_max_window_bits → OkHttp рвал (compressionOff); маяк через VPN-маршрут (сокет на каждый LAN IP); macOS «Локальная сеть» (ad-hoc подпись сбрасывала → macos/install_local.sh с постоянной подписью). Лог Mac: ~/Library/Containers/com.androidlink.app/Data/Library/Application Support/com.androidlink.app/diag.log.
 - Синк: 1437 SMS, 510 контактов. Звонки=0 чинено в 6b5e24d (CallLog отвергал LIMIT в sortOrder), ждёт проверки на телефоне.
 - Юзер подтвердил: всё работает. Был обрыв 1002 в 16:09 (причина не выяснена, логирование ошибок добавлено, Mac не переустановлен).
+- Ф3 картинки в буфере (91c8b92): Mac — Swift методы clipCount/clipImage/setClipImage в канале androidlink/tray, store поллит changeCount; тип `clip_image` {image: base64 JPEG ≤8МБ}. Android — ClipProvider (content://com.androidlink.clip), приём в LinkService, отправка через плитку ClipPushActivity. Ждёт теста.
 - Осталось: мерж ветки phase1-core-link в main (по ок юзера); Ф3: картинки в буфере, MMS/группы. Скриншоты недоступны (нет Screen Recording у терминала).
 - Обрыв 1002 повторяется ~раз в сессию, реконнект за 3с — некритично; причину смотреть по логу Android (adb заблокирован).
