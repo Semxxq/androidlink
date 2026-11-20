@@ -28,6 +28,7 @@
 - Решения: dynamic_color убран (несовместим с material_ui), window_manager убран (окно через macos_window_utils + Swift), desugaring вкл. для flutter_local_notifications.
 - Подпись: android/app/release.jks + android/key.properties (в .gitignore, НЕ терять — иначе обновления только с удалением). Телефон Samsung: мешает «Автоблокировщик» (блокирует и установку, и adb).
 - 2026-11-20: СВЯЗЬ РАБОТАЕТ на Samsung SM-S947B (коммит c106217). Причины были: Dart отвечал permessage-deflate с client_max_window_bits → OkHttp рвал (compressionOff); маяк через VPN-маршрут (сокет на каждый LAN IP); macOS «Локальная сеть» (ad-hoc подпись сбрасывала → macos/install_local.sh с постоянной подписью). Лог Mac: ~/Library/Containers/com.androidlink.app/Data/Library/Application Support/com.androidlink.app/diag.log.
-- Синк: 1437 SMS, 510 контактов, 0 звонков (проверить разрешение журнала звонков).
-- Осталось: проверить звонки/уведомления/буфер/файлы на телефоне; поставить новый APK с Desktop (там диагностика). Скриншоты недоступны (нет Screen Recording у терминала).
-- Осталось: тест на телефоне + фикс багов; Ф3: картинки в буфере, MMS, групповые чаты.
+- Синк: 1437 SMS, 510 контактов. Звонки=0 чинено в 6b5e24d (CallLog отвергал LIMIT в sortOrder), ждёт проверки на телефоне.
+- Юзер подтвердил: всё работает. Был обрыв 1002 в 16:09 (причина не выяснена, логирование ошибок добавлено, Mac не переустановлен).
+- Осталось: мерж ветки phase1-core-link в main (по ок юзера); Ф3: картинки в буфере, MMS/группы. Скриншоты недоступны (нет Screen Recording у терминала).
+- Обрыв 1002 повторяется ~раз в сессию, реконнект за 3с — некритично; причину смотреть по логу Android (adb заблокирован).
