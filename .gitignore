@@ -16,3 +16,4 @@ ios/Flutter/ephemeral/
 # release signing (never commit)
 android/key.properties
 android/app/release.jks
+macos/signing/

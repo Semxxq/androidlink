@@ -72,6 +72,7 @@ class BridgeService {
   final _issue = BehaviorSubject<String?>.seeded(null);
   final _peerName = BehaviorSubject<String?>.seeded(null);
   final _nativeTransfers = StreamController<Map<String, dynamic>>.broadcast();
+  final _diag = BehaviorSubject<String>.seeded('');
 
   Stream<BridgeStatus> get status => _status.stream;
   Stream<BridgeMessage> get messages => _messages.stream;
@@ -91,6 +92,12 @@ class BridgeService {
 
   /// Android: name of the paired Mac.
   Stream<String?> get peerName => _peerName.stream;
+
+  /// Android: last connection error / progress from the native service.
+  Stream<String> get diag => _diag.stream;
+
+  /// Android: full diagnostics (hosts tried, phone IPs, last beacon…).
+  Future<Map<String, dynamic>> diagnostics() async => await _phone?.diagnostics() ?? const {};
 
   /// Android: file transfer progress reported by the native service.
   Stream<Map<String, dynamic>> get nativeTransfers => _nativeTransfers.stream;
@@ -169,6 +176,13 @@ class _MacHost {
   static const _beaconTag = 'ANDROIDLINK2';
 
   late File _storeFile;
+  IOSink? _diagLog;
+
+  /// Connection diagnostics → Application Support/diag.log
+  void diag(String m) {
+    _log.i(m);
+    _diagLog?.writeln('${DateTime.now().toIso8601String()} $m');
+  }
   String _macId = '';
   final Map<String, _Paired> _pairedMap = {};
   final List<_Peer> _peers = [];
@@ -176,9 +190,9 @@ class _MacHost {
   List<String> _ips = [];
   int _port = AL.wsPort;
   HttpServer? _server;
-  RawDatagramSocket? _udp;
   Timer? _beaconTimer;
   Timer? _ipTimer;
+  int _beaconFails = 0;
 
   // Pending pairing shown in the QR. Single use.
   late List<int> _pendingKey;
@@ -204,7 +218,9 @@ class _MacHost {
   void stop() {
     _beaconTimer?.cancel();
     _ipTimer?.cancel();
-    _udp?.close();
+    for (final u in _udpByIp.values) {
+      u.close();
+    }
     for (final p in List.of(_peers)) {
       p.ws.close(1001, 'shutdown');
     }
@@ -219,6 +235,9 @@ class _MacHost {
     final dir = await getApplicationSupportDirectory();
     await dir.create(recursive: true);
     _storeFile = File('${dir.path}/pairing.json');
+    final lf = File('${dir.path}/diag.log');
+    if (await lf.exists() && await lf.length() > 512 * 1024) await lf.delete();
+    _diagLog = lf.openWrite(mode: FileMode.append);
     try {
       final m = jsonDecode(await _storeFile.readAsString()) as Map<String, dynamic>;
       _macId = m['macId'] as String? ?? '';
@@ -278,7 +297,11 @@ class _MacHost {
   Future<void> _refreshIps() async {
     try {
       final ifs = await NetworkInterface.list(type: InternetAddressType.IPv4);
-      int rank(NetworkInterface i) => i.name.startsWith('en') ? 0 : (i.name.startsWith('utun') ? 2 : 1);
+      final ifsAll = List.of(ifs);
+      // VPN tunnels (utun/ipsec/ppp) are unreachable for the phone — LAN only.
+      bool vpn(NetworkInterface i) => RegExp(r'^(utun|ipsec|ppp|tun|tap|wg)').hasMatch(i.name);
+      int rank(NetworkInterface i) => i.name.startsWith('en') ? 0 : 1;
+      ifs.removeWhere(vpn);
       ifs.sort((a, c) => rank(a).compareTo(rank(c)));
       final ips = <String>[
         for (final i in ifs)
@@ -287,7 +310,7 @@ class _MacHost {
       ];
       if (ips.join(',') != _ips.join(',')) {
         _ips = ips;
-        _log.i('Mac IPs: $_ips');
+        diag('Mac IPs: $_ips (all: ${ifsAll.map((i) => '${i.name}=${i.addresses.map((a) => a.address).join('/')}').join(', ')})');
         _publishQr();
       }
     } catch (e) {
@@ -310,16 +333,22 @@ class _MacHost {
       return;
     }
     b._status.add(BridgeStatus.searching);
-    _log.i('WS server on :$_port');
+    diag('WS server listening on 0.0.0.0:$_port');
     _server!.listen((req) async {
+      diag('HTTP ${req.method} ${req.uri} from ${req.connectionInfo?.remoteAddress.address}:${req.connectionInfo?.remotePort}');
       if (!WebSocketTransformer.isUpgradeRequest(req)) {
+        diag('not a WebSocket upgrade: headers=${req.headers}');
         req.response.statusCode = HttpStatus.notFound;
         await req.response.close();
         return;
       }
       try {
-        _onSocket(await WebSocketTransformer.upgrade(req));
-      } catch (_) {}
+        // No permessage-deflate: OkHttp rejects the "client_max_window_bits" Dart
+        // answers with, and encrypted frames do not compress anyway.
+        _onSocket(await WebSocketTransformer.upgrade(req, compression: CompressionOptions.compressionOff));
+      } catch (e, st) {
+        diag('upgrade failed: $e\n$st');
+      }
     });
   }
 
@@ -334,9 +363,13 @@ class _MacHost {
       if (peer != null) _removePeer(peer!);
     }
 
+    diag('socket open, waiting for hello');
     ws.listen(
       (raw) {
-        if (raw is! String) return;
+        if (raw is! String) {
+          diag('binary frame ignored (${(raw as List).length} bytes)');
+          return;
+        }
         final p = peer;
         if (p == null) {
           peer = _handshake(ws, raw);
@@ -345,8 +378,14 @@ class _MacHost {
         }
         p.inbound(() => _onFrame(p, raw));
       },
-      onDone: done,
-      onError: (_) => done(),
+      onDone: () {
+        if (peer == null) diag('closed before hello: code=${ws.closeCode} reason=${ws.closeReason}');
+        done();
+      },
+      onError: (Object e) {
+        diag('socket error: $e');
+        done();
+      },
       cancelOnError: true,
     );
   }
@@ -364,6 +403,7 @@ class _MacHost {
     final name = h['name'] as String? ?? 'Android';
     final pairId = h['pair'] as String?;
     if (deviceId.isEmpty || phoneSid.isEmpty) {
+      diag('hello rejected: missing fields');
       ws.close(4400, 'bad hello');
       return null;
     }
@@ -378,7 +418,9 @@ class _MacHost {
     } else {
       rec = _pairedMap[deviceId];
     }
+    diag('hello from $name ($deviceId) pair=${pairId ?? '-'} pending=$_pendingId known=${_pairedMap.containsKey(deviceId)}');
     if (rec == null) {
+      diag('→ rejected 4401 (unknown device / stale QR)');
       ws.close(4401, 'unpaired');
       return null;
     }
@@ -395,13 +437,14 @@ class _MacHost {
     _emitPeers();
     _sendTo(peer, 'welcome', {'mac': _macId, 'name': _macName, 's': peer.macSid},
         LinkCrypto.randomId());
-    _log.i('Android connected: ${peer.info.name}. Total: ${_peers.length}');
+    diag('connected: ${peer.info.name}. Total: ${_peers.length}');
     return peer;
   }
 
   Future<void> _onFrame(_Peer p, String raw) async {
     final plain = await LinkCrypto.open(p.key, raw);
     if (plain == null) {
+      diag('frame from ${p.info.name} failed to decrypt → 4403');
       await p.ws.close(4403, 'bad frame');
       return;
     }
@@ -429,7 +472,7 @@ class _MacHost {
   void _removePeer(_Peer p) {
     if (!_peers.remove(p)) return;
     _emitPeers();
-    _log.w('Android disconnected: ${p.info.name}. Remaining: ${_peers.length}');
+    diag('disconnected: ${p.info.name} code=${p.ws.closeCode} reason=${p.ws.closeReason}');
   }
 
   void _emitPeers() {
@@ -453,27 +496,45 @@ class _MacHost {
 
   // ── discovery beacon ──
 
+  /// One UDP socket per LAN address: binding to the interface IP makes the
+  /// broadcast leave through Wi-Fi/Ethernet even when a VPN owns the default
+  /// route (with 0.0.0.0 macOS routes 255.255.255.255 into the tunnel).
+  final Map<String, RawDatagramSocket> _udpByIp = {};
+
   Future<void> _startBeacon() async {
-    try {
-      _udp = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-      _udp!.broadcastEnabled = true;
-    } catch (e) {
-      _log.e('UDP beacon failed: $e');
-      return;
+    _beaconTimer = Timer.periodic(const Duration(seconds: 2), (_) => _beacon());
+  }
+
+  Future<void> _beacon() async {
+    for (final ip in _udpByIp.keys.where((ip) => !_ips.contains(ip)).toList()) {
+      _udpByIp.remove(ip)?.close();
     }
-    _beaconTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-      final data = utf8.encode('$_beaconTag|$_macId|$_port');
-      final targets = {
-        '255.255.255.255',
-        for (final ip in _ips)
-          if (ip.split('.').length == 4) '${ip.substring(0, ip.lastIndexOf('.'))}.255',
-      };
-      for (final t in targets) {
+    final data = utf8.encode('$_beaconTag|$_macId|$_port');
+    for (final ip in _ips) {
+      var sock = _udpByIp[ip];
+      if (sock == null) {
         try {
-          _udp?.send(data, InternetAddress(t), AL.udpPort);
-        } catch (_) {}
+          sock = await RawDatagramSocket.bind(InternetAddress(ip), 0);
+          sock.broadcastEnabled = true;
+          _udpByIp[ip] = sock;
+          diag('beacon socket bound to $ip');
+        } catch (e) {
+          if (_beaconFails++ % 30 == 0) diag('beacon bind $ip failed: $e');
+          continue;
+        }
       }
-    });
+      final subnet = ip.split('.').length == 4 ? '${ip.substring(0, ip.lastIndexOf('.'))}.255' : null;
+      for (final t in {'255.255.255.255', if (subnet != null) subnet}) {
+        try {
+          final n = sock.send(data, InternetAddress(t), AL.udpPort);
+          if (n == 0 && _beaconFails++ % 30 == 0) {
+            diag('beacon $ip → $t blocked (0 bytes) — проверь «Локальная сеть» в настройках macOS');
+          }
+        } catch (e) {
+          if (_beaconFails++ % 30 == 0) diag('beacon $ip → $t failed: $e');
+        }
+      }
+    }
   }
 }
 
@@ -496,6 +557,8 @@ class _PhoneLink {
           try {
             b._messages.add(BridgeMessage.fromJson(m['data'] as String));
           } catch (_) {}
+        case 'diag':
+          b._diag.add(m['data'] as String? ?? '');
         case 'transfer':
           try {
             b._nativeTransfers.add(jsonDecode(m['data'] as String) as Map<String, dynamic>);
@@ -510,6 +573,7 @@ class _PhoneLink {
       final s = (await _methods.invokeMethod<Map>('state'))?.cast<String, dynamic>();
       if (s == null) return;
       b._peerName.add(s['macName'] as String?);
+      b._diag.add(s['diag'] as String? ?? '');
       _applyStatus(s['status'] as String? ?? 'unpaired');
     } catch (_) {}
   }
@@ -542,6 +606,9 @@ class _PhoneLink {
 
   Future<bool> connectIp(String ip) async =>
       await _methods.invokeMethod<bool>('connectIp', {'ip': ip}) ?? false;
+
+  Future<Map<String, dynamic>> diagnostics() async =>
+      (await _methods.invokeMethod<Map>('state'))?.cast<String, dynamic>() ?? const {};
 
   Future<void> sendFiles(List<String> paths) async {
     await _methods.invokeMethod('sendFiles', {'paths': paths});

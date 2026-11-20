@@ -366,15 +366,50 @@ class _StatusCard extends StatelessWidget {
               label: const Text('Сканировать снова'),
             ),
           ],
-          if (status == BridgeStatus.searching) ...[
+          if (status != BridgeStatus.connected) ...[
             const SizedBox(height: 12),
-            Text('Mac и телефон должны быть в одной Wi-Fi сети, а AndroidLink на Mac — запущен.',
-                style: tt.bodySmall?.copyWith(color: fg.withValues(alpha: 0.7))),
+            StreamBuilder<String>(
+              stream: BridgeService.instance.diag,
+              builder: (context, d) => (d.data ?? '').isEmpty
+                  ? const SizedBox.shrink()
+                  : Text(d.data!, style: tt.bodySmall?.copyWith(color: fg.withValues(alpha: 0.85), fontFamily: 'monospace')),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => _showDiagnostics(context),
+                icon: const Icon(Icons.troubleshoot_rounded, size: 18),
+                label: const Text('Диагностика'),
+                style: TextButton.styleFrom(foregroundColor: fg),
+              ),
+            ),
           ],
         ]),
       ),
     );
   }
+}
+
+Future<void> _showDiagnostics(BuildContext context) async {
+  final d = await BridgeService.instance.diagnostics();
+  if (!context.mounted) return;
+  final beacon = (d['beaconAgo'] as num?)?.toInt() ?? -1;
+  final text = [
+    'Статус: ${d['status']}',
+    'Адреса Mac из QR: ${d['hosts'] ?? '—'}',
+    'Адреса телефона: ${d['localIps'] ?? '—'}',
+    'Сигнал Mac (UDP): ${beacon < 0 ? 'ни разу не получен' : '$beacon с назад'}',
+    'Последняя ошибка: ${(d['diag'] as String?)?.isNotEmpty == true ? d['diag'] : '—'}',
+  ].join('\n');
+  await showDialog<void>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: const Text('Диагностика'),
+      content: SelectableText(text, style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5)),
+      actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Закрыть'))],
+    ),
+  );
 }
 
 class _ActionTile extends StatelessWidget {

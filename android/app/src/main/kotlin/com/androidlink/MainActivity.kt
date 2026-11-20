@@ -52,6 +52,11 @@ class MainActivity : FlutterActivity() {
                     "status" to currentStatus(prefs),
                     "paired" to prefs.isPaired,
                     "macName" to prefs.macName,
+                    "diag" to LinkService.diag,
+                    "hosts" to prefs.hosts.joinToString(", "),
+                    "beaconAgo" to (if (LinkService.lastBeacon == 0L) -1L
+                        else (System.currentTimeMillis() - LinkService.lastBeacon) / 1000),
+                    "localIps" to localIps(),
                 ))
                 "pair" -> {
                     val ok = prefs.pair(call.argument<String>("qr") ?: "")
@@ -116,6 +121,13 @@ class MainActivity : FlutterActivity() {
         uiListener = null
         super.onDestroy()
     }
+
+    private fun localIps(): String = try {
+        java.net.NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback }
+            .flatMap { i -> i.inetAddresses.toList().filterIsInstance<java.net.Inet4Address>().map { "${i.name} ${it.hostAddress}" } }
+            .joinToString(", ")
+    } catch (e: Exception) { "" }
 
     private fun currentStatus(prefs: LinkPrefs): String =
         if (!prefs.isPaired) "unpaired"

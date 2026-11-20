@@ -60,6 +60,14 @@ class LinkService : Service() {
         @Volatile var status: String = "unpaired"
             private set
 
+        /** Human-readable diagnostics for the UI (why we can't connect). */
+        @Volatile var diag: String = ""
+            private set
+        @Volatile var lastBeacon: Long = 0
+            private set
+        @Volatile var lastHost: String = ""
+            private set
+
         /** UI listeners: (kind, data). kind = "status" | "message". */
         val listeners = CopyOnWriteArraySet<(String, Any) -> Unit>()
 
@@ -247,6 +255,8 @@ class LinkService : Service() {
         val key = prefs.key ?: run { setStatus("unpaired"); return }
         if (ws != null) return
         setStatus("connecting")
+        lastHost = "$ip:$port"
+        setDiag("Подключаюсь к $ip:$port…")
         phoneSid = LinkCrypto.randomId()
         authed = false
         wsHost = ip
@@ -264,14 +274,23 @@ class LinkService : Service() {
                 handler.post { onDrop(webSocket, code) }
             }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                handler.post { onDrop(webSocket, code) }
+                handler.post {
+                    if (webSocket === ws) setDiag("Mac закрыл соединение ($code ${reason.ifEmpty { "" }})".trim())
+                    onDrop(webSocket, code)
+                }
             }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                handler.post { onDrop(webSocket, -1) }
+                handler.post {
+                    if (webSocket === ws) setDiag("$ip:$port — ${t.javaClass.simpleName}: ${t.message ?: ""}" +
+                        (response?.let { " (HTTP ${it.code})" } ?: ""))
+                    onDrop(webSocket, -1)
+                }
             }
         })
         ws = sock
-        handler.postDelayed({ if (ws === sock && !authed) sock.cancel() }, 10_000)
+        handler.postDelayed({
+            if (ws === sock && !authed) { setDiag("$ip:$port — нет ответа 10 с"); sock.cancel() }
+        }, 10_000)
     }
 
     private fun sendHello(sock: WebSocket) {
@@ -286,7 +305,7 @@ class LinkService : Service() {
 
     private fun onFrame(key: ByteArray, frame: String, ip: String, port: Int) {
         val plain = LinkCrypto.open(key, frame) ?: run {
-            Log.w(TAG, "undecryptable frame, dropping link"); ws?.cancel(); return
+            setDiag("Не удалось расшифровать ответ Mac — отсканируй QR заново"); ws?.cancel(); return
         }
         val env = try { JSONObject(plain) } catch (e: Exception) { return }
         if (env.optString("s") != phoneSid) return
@@ -304,6 +323,7 @@ class LinkService : Service() {
             handler.removeCallbacks(retry)
             stopDiscovery()
             setStatus("connected")
+            setDiag("")
             sendNow("device_info", deviceInfo())
             while (queue.isNotEmpty() && ws != null) {
                 val (t, p) = queue.removeFirst(); sendNow(t, p)
@@ -453,7 +473,14 @@ class LinkService : Service() {
         mcLock = null
     }
 
+    private fun setDiag(d: String) {
+        diag = d
+        Log.i(TAG, d)
+        emitUi("diag", d)
+    }
+
     private fun onBeacon(ip: String, port: Int) {
+        lastBeacon = System.currentTimeMillis()
         if (authed) return
         if (ws != null && wsHost == ip) return
         ws?.cancel(); ws = null

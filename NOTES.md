@@ -26,5 +26,6 @@
 - Дизайн (выбор юзера): Mac — нативный macOS (как Messages: сайдбар с телефоном+батареей, системные шрифты, светлая/тёмная авто, menubar). Android — Material You (dynamic color, M3).
 - Ф2 сделано (коммит 5413467): Android — PhoneData.kt (sms/calls/contacts sync, SmsObserver по content://sms), PhoneControl.kt (answer/decline/dial, ring), FileTransfer.kt (чанки 192К, окно 24, ack/8), ShareActivity (share + буфер), ClipTileService, ответ на уведомления через RemoteInput. Mac — lib/mac/: store.dart (MacStore, history.json), notifier.dart (баннеры с действиями), tray.dart + AppDelegate.swift (menubar), ui/*. Android UI — lib/android/ (M3, seed из system_accent1_500).
 - Решения: dynamic_color убран (несовместим с material_ui), window_manager убран (окно через macos_window_utils + Swift), desugaring вкл. для flutter_local_notifications.
+- Подпись: android/app/release.jks + android/key.properties (в .gitignore, НЕ терять — иначе обновления только с удалением). Телефон Samsung: мешает «Автоблокировщик» (блокирует и установку, и adb).
 - Не проверено на железе. Скриншоты недоступны (нет Screen Recording у терминала).
 - Осталось: тест на телефоне + фикс багов; Ф3: картинки в буфере, MMS, групповые чаты.
