@@ -1,17 +1,34 @@
-# androidlink
+# AndroidLink
 
-A new Flutter project.
+Связь Android-телефона и Mac в духе Continuity — **без серверов и облака**. Телефон и Mac общаются напрямую по локальной сети, весь трафик зашифрован AES-256-GCM ключом из QR-кода.
 
-## Getting Started
+## Возможности
 
-This project is a starting point for a Flutter application.
+- **Сообщения** — SMS, MMS с фото и групповые чаты на Mac, ответ прямо с Mac, баннеры macOS с быстрым ответом
+- **Звонки** — входящие на Mac (принять / отклонить), набор номера, журнал звонков
+- **Уведомления** телефона на Mac, ответ на сообщения мессенджеров
+- **Буфер обмена** — текст и картинки в обе стороны
+- **Файлы** — отправка в обе стороны (drag & drop на Mac, «Поделиться» на Android)
+- **Найти телефон** — громкий звонок с вибрацией даже в беззвучном режиме
+- **Меню-бар** на Mac с карточкой телефона: батарея, непрочитанные, пропущенные
 
-A few resources to get you started if this is your first Flutter project:
+## Установка
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+Скачай файлы из [Releases](../../releases/latest):
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+1. **Mac** (macOS 12+): распакуй `AndroidLink-mac.zip`, перенеси `AndroidLink.app` в «Программы». Приложение не нотаризовано: при первом запуске — правый клик → «Открыть», или «Системные настройки → Конфиденциальность и безопасность → Открыть всё равно». Разреши доступ к «Локальной сети».
+2. **Android** (8.0+): установи `AndroidLink.apk` (разреши установку из неизвестных источников). На Samsung может понадобиться временно выключить «Автоблокировщик».
+3. Открой приложение на Mac → отсканируй QR-код телефоном. Оба устройства должны быть в одной Wi-Fi сети (VPN на Mac может мешать обнаружению).
+
+## Сборка
+
+Flutter 3.50+, Xcode, Android SDK.
+
+```bash
+flutter build apk --release      # Android
+flutter build macos --release    # Mac (или macos/install_local.sh)
+```
+
+## Приватность
+
+Никаких серверов, аккаунтов и телеметрии. Данные хранятся только на твоих устройствах.
