@@ -34,5 +34,6 @@
 - Mac UI: «?» вместо иконок = не было cupertino_icons в pubspec (добавлен). Menubar — карточка PhoneCardView в AppDelegate.swift (батарея, SMS/уведомл./пропущ. за 24ч), данные из tray.dart. SwiftUI в NSMenu не работал → карточка на чистом AppKit (PhoneCardView.apply).
 - MMS/группы: Android Mms.kt (content://mms, превью JPEG ≤640px base64, sender, names; observer content://mms-sms/), MMS идут в sms_batch (до 300). Mac: threadKey() — группа = "g:"+отсорт. номера, address "a,b,c"; ответ в группу = SMS каждому по отдельности (не групповой MMS). Ждёт теста.
 - Файлы Mac: open/reveal через NSWorkspace (канал tray: openFile/reveal; Process open в sandbox не работает), история передач в AppSupport/transfers.json (200).
+- Найти телефон: PhoneControl.ring — перебор URI мелодий, вибрация, уведомление-будильник (Нашёл → MainActivity стопит); Mac кнопка = стоп при повторе.
 - Осталось: мерж ветки phase1-core-link в main (по ок юзера); Ф3: картинки в буфере, MMS/группы. Скриншоты недоступны (нет Screen Recording у терминала).
 - Обрыв 1002 повторяется ~раз в сессию, реконнект за 3с — некритично; причину смотреть по логу Android (adb заблокирован).
