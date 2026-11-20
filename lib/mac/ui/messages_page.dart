@@ -162,7 +162,7 @@ class _MessagesPageState extends State<MessagesPage> {
                           ]),
                           const SizedBox(height: 2),
                           Text(
-                            '${last.incoming ? '' : 'Вы: '}${last.body}',
+                            '${last.incoming ? '' : 'Вы: '}${last.body.isEmpty && last.image != null ? '📷 Фото' : last.body}',
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: txt(context, size: 12, color: fg2),
@@ -377,9 +377,33 @@ class _Bubble extends StatelessWidget {
                           bottomRight: out && tail ? small : r,
                         ),
                       ),
-                      child: SelectableText(
-                        msg.body,
-                        style: txt(context, size: 13.5, color: out ? const Color(0xFFFFFFFF) : p.label),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (!out && msg.sender != null && msg.address.contains(','))
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: Text(MacStore.instance.displayName(msg.sender!),
+                                  style: txt(context, size: 11, w: FontWeight.w600, color: p.secondary)),
+                            ),
+                          if (msg.imageBytes != null)
+                            Padding(
+                              padding: EdgeInsets.only(bottom: msg.body.isEmpty ? 0 : 6),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 280, maxHeight: 320),
+                                  child: Image.memory(msg.imageBytes!, fit: BoxFit.cover, gaplessPlayback: true),
+                                ),
+                              ),
+                            ),
+                          if (msg.body.isNotEmpty)
+                            SelectableText(
+                              msg.body,
+                              style: txt(context, size: 13.5, color: out ? const Color(0xFFFFFFFF) : p.label),
+                            ),
+                        ],
                       ),
                     ),
                   ),

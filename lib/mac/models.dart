@@ -1,7 +1,15 @@
 /// Data the Mac keeps about the phone. JSON round-trip for local history.
 library;
 
+import 'dart:convert';
 import 'dart:typed_data';
+
+/// Thread key: one number, or a sorted participant set for group chats.
+String threadKey(String address) {
+  if (!address.contains(',')) return normalizeNumber(address);
+  final parts = address.split(',').map(normalizeNumber).where((x) => x.isNotEmpty).toSet().toList()..sort();
+  return 'g:${parts.join(',')}';
+}
 
 String normalizeNumber(String raw) {
   final digits = raw.replaceAll(RegExp(r'[^0-9]'), '');
@@ -18,10 +26,16 @@ class SmsMsg {
     required this.incoming,
     this.status = 'sent',
     this.read = true,
+    this.sender,
+    this.image,
   });
 
   final String id;
-  final String address;
+  final String address; // "a,b,c" for group threads
+  final String? sender; // group: who wrote an incoming message
+  final String? image; // MMS picture preview, base64 JPEG
+  Uint8List? _img;
+  Uint8List? get imageBytes => image == null ? null : (_img ??= base64Decode(image!));
   final String body;
   final int ts;
   final bool incoming;
@@ -39,16 +53,21 @@ class SmsMsg {
         incoming: j['in'] as bool? ?? false,
         status: j['status'] as String? ?? 'sent',
         read: j['read'] as bool? ?? true,
+        sender: j['sender'] as String?,
+        image: j['image'] as String?,
       );
 
   Map<String, dynamic> toJson() => {
         'id': id, 'address': address, 'body': body, 'ts': ts,
         'in': incoming, 'status': status, 'read': read,
+        if (sender != null) 'sender': sender,
+        if (image != null) 'image': image,
       };
 }
 
 class SmsThread {
   SmsThread(this.key, this.address);
+  bool get isGroup => address.contains(',');
   final String key;
   String address;
   final List<SmsMsg> messages = [];

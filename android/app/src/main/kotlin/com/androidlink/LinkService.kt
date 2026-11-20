@@ -101,6 +101,7 @@ class LinkService : Service() {
     lateinit var files: FileTransfer
         private set
     private var smsObserver: PhoneData.SmsObserver? = null
+    private var mmsObserver: Mms.Observer? = null
     private val io = Executors.newSingleThreadExecutor()
     private lateinit var thread: HandlerThread
     private lateinit var handler: Handler
@@ -151,6 +152,7 @@ class LinkService : Service() {
             it.register()
             handler.post { it.onChange(false, null) } // catch up on SMS received while we were dead
         }
+        mmsObserver = Mms.Observer(this, handler) { send("sms", it) }.also { it.register() }
         handler.post { connectNext() }
     }
 
@@ -169,6 +171,7 @@ class LinkService : Service() {
         instance = null
         try { unregisterReceiver(batteryReceiver) } catch (_: Exception) {}
         try { smsObserver?.unregister() } catch (_: Exception) {}
+        try { mmsObserver?.unregister() } catch (_: Exception) {}
         files.shutdown()
         io.shutdownNow()
         netCallback?.let {
@@ -428,8 +431,11 @@ class LinkService : Service() {
             @Suppress("DEPRECATION")
             val sm = if (Build.VERSION.SDK_INT >= 31) getSystemService(SmsManager::class.java) else SmsManager.getDefault()
             val parts = sm.divideMessage(body)
-            if (parts.size > 1) sm.sendMultipartTextMessage(to, null, parts, null, null)
-            else sm.sendTextMessage(to, null, body, null, null)
+            // Group thread: Mac sends "a,b,c" — deliver to every participant.
+            for (r in to.split(',').map { it.trim() }.filter { it.isNotEmpty() }) {
+                if (parts.size > 1) sm.sendMultipartTextMessage(r, null, parts, null, null)
+                else sm.sendTextMessage(r, null, body, null, null)
+            }
             true
         } catch (e: Exception) {
             Log.w(TAG, "sendSms failed: ${e.message}")

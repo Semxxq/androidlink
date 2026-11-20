@@ -66,6 +66,12 @@ object PhoneData {
                 }
             }
         } catch (e: Exception) { Log.w(TAG, "sms sync: ${e.message}") }
+        for ((_, o) in Mms.query(ctx, minOf(limit / 5, 300))) {
+            arr.put(o)
+            if (arr.length() >= 50) {
+                emit("sms_batch", JSONObject().put("items", arr).put("done", false)); arr = JSONArray()
+            }
+        }
         emit("sms_batch", JSONObject().put("items", arr).put("done", true))
     }
 

@@ -66,7 +66,9 @@ class MacStore extends ChangeNotifier {
 
   SmsThread? thread(String key) => _threads[key];
 
-  String displayName(String address) => _names[normalizeNumber(address)] ?? address;
+  String displayName(String address) => address.contains(',')
+      ? address.split(',').map((a) => _names[normalizeNumber(a)] ?? a.trim()).join(', ')
+      : _names[normalizeNumber(address)] ?? address;
   bool hasName(String address) => _names.containsKey(normalizeNumber(address));
 
   // ── lifecycle ──
@@ -165,14 +167,14 @@ class MacStore extends ChangeNotifier {
       case AL.typeSms:
         final msg = SmsMsg.fromJson(p);
         final isNew = _addSms(msg);
-        if (p['name'] is String) _names[normalizeNumber(msg.address)] = p['name'] as String;
+        _learnNames(p);
         if (isNew && msg.incoming) _bannerSms(msg);
         _scheduleSave();
       case AL.typeSmsBatch:
         for (final i in (p['items'] as List? ?? const [])) {
           final j = (i as Map).cast<String, dynamic>();
           _addSms(SmsMsg.fromJson(j), sort: false);
-          if (j['name'] is String) _names[normalizeNumber(j['address'] as String? ?? '')] = j['name'] as String;
+          _learnNames(j);
         }
         for (final t in _threads.values) {
           t.messages.sort((a, b) => a.ts.compareTo(b.ts));
@@ -268,8 +270,19 @@ class MacStore extends ChangeNotifier {
   }
 
   /// Returns true if the message is new.
+  void _learnNames(Map<String, dynamic> j) {
+    final addr = j['address'] as String? ?? '';
+    if (j['name'] is String && !addr.contains(',')) _names[normalizeNumber(addr)] = j['name'] as String;
+    final ns = j['names'];
+    if (ns is Map) {
+      ns.forEach((k, v) {
+        if (v is String) _names[normalizeNumber(k as String)] = v;
+      });
+    }
+  }
+
   bool _addSms(SmsMsg msg, {bool sort = true}) {
-    final key = normalizeNumber(msg.address);
+    final key = threadKey(msg.address);
     final t = _threads.putIfAbsent(key, () => SmsThread(key, msg.address));
     final i = t.messages.indexWhere((x) => x.id == msg.id);
     if (i >= 0) {
@@ -346,10 +359,13 @@ class MacStore extends ChangeNotifier {
     MacNotifier.instance.show(
       key: 'sms:${m.id}',
       title: displayName(m.address),
-      body: m.body,
+      body: [
+        if (m.sender != null && m.address.contains(',')) '${displayName(m.sender!)}:',
+        m.body.isEmpty && m.image != null ? '📷 Фото' : m.body,
+      ].join(' '),
       category: MacNotifier.catSms,
       payload: 'sms|${m.address}',
-      thread: normalizeNumber(m.address),
+      thread: threadKey(m.address),
     );
   }
 
@@ -359,7 +375,7 @@ class MacStore extends ChangeNotifier {
         if (action == 'reply' && (input ?? '').trim().isNotEmpty) {
           sendSms(id, input!.trim());
         } else {
-          openThreadRequest.value = normalizeNumber(id);
+          openThreadRequest.value = threadKey(id);
         }
       case 'call':
         if (action == 'answer') callAction('answer');
@@ -484,7 +500,7 @@ class MacStore extends ChangeNotifier {
 
   /// Starts a new conversation; returns the thread key.
   String newThread(String address) {
-    final key = normalizeNumber(address);
+    final key = threadKey(address);
     _threads.putIfAbsent(key, () => SmsThread(key, address));
     notifyListeners();
     return key;
