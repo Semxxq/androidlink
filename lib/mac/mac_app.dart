@@ -141,11 +141,31 @@ class _DeviceHeader extends StatelessWidget {
       decoration: BoxDecoration(color: p.hover, borderRadius: BorderRadius.circular(10)),
       child: Row(children: [
         Stack(clipBehavior: Clip.none, children: [
-          MacosIcon(CupertinoIcons.device_phone_portrait, size: 30, color: d != null ? p.label : p.tertiary),
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: d != null
+                    ? const [Color(0xFF3390FF), Color(0xFF734DF2)]
+                    : const [Color(0xFF9A9AA0), Color(0xFFBDBDC2)],
+              ),
+              boxShadow: [
+                if (d != null) BoxShadow(color: const Color(0xFF3390FF).withValues(alpha: 0.35), blurRadius: 8, offset: const Offset(0, 3)),
+              ],
+            ),
+            child: const Center(child: MacosIcon(CupertinoIcons.device_phone_portrait, size: 20, color: Color(0xFFFFFFFF))),
+          ),
           Positioned(
             right: -3,
-            bottom: -1,
-            child: _Dot(d != null ? Pal.green : const Color(0xFF8E8E93), size: 9),
+            bottom: -3,
+            child: Container(
+              decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.hover, width: 2)),
+              child: _Dot(d != null ? Pal.green : const Color(0xFF8E8E93), size: 10),
+            ),
           ),
         ]),
         const SizedBox(width: 10),
@@ -162,8 +182,13 @@ class _DeviceHeader extends StatelessWidget {
                   _Battery(level: d.battery, charging: d.charging),
                   const SizedBox(width: 5),
                   Text('${d.battery}%', style: txt(context, size: 11, color: p.secondary)),
-                ] else
-                  Text('Подключён', style: txt(context, size: 11, color: p.secondary)),
+                ] else ...[
+                  const _Battery(level: 0, charging: false),
+                  const SizedBox(width: 5),
+                  Text('0%', style: txt(context, size: 11, color: p.secondary)),
+                ],
+                const SizedBox(width: 6),
+                Text('· ${s.unreadCount} SMS', style: txt(context, size: 11, color: p.secondary)),
                 if (s.syncing) ...[
                   const SizedBox(width: 6),
                   const SizedBox(width: 10, height: 10, child: ProgressCircle(radius: 5)),

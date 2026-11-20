@@ -34,13 +34,16 @@ class TrayBridge {
   void _update() {
     final s = MacStore.instance;
     final d = s.device;
-    final battery = d == null || d.battery < 0 ? '' : '${d.battery}%${d.charging ? ' ⚡︎' : ''}';
-    final unread = s.unreadCount;
-    final subtitle = [
-      if (battery.isNotEmpty) 'Батарея $battery',
-      if (unread > 0) 'Непрочитанных: $unread',
-    ].join(' · ');
-    final args = {'connected': d != null, 'title': d?.name ?? '', 'subtitle': subtitle};
+    final args = {
+      'connected': d != null,
+      'title': d?.name ?? '',
+      'battery': d?.battery ?? -1,
+      'charging': d?.charging ?? false,
+      'unread': s.unreadCount,
+      'notifs': s.notifications.length,
+      'missed': s.calls.where((c) => c.type == 'missed' && DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(c.ts)).inHours < 24).length,
+      'syncing': s.syncing,
+    };
     final key = args.toString();
     if (key == _last) return;
     _last = key;

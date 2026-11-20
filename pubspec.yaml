@@ -40,6 +40,7 @@ dependencies:
   macos_window_utils: ^1.9.1
   flutter_localizations:
     sdk: flutter
+  cupertino_icons: ^2.0.0
 
 dev_dependencies:
   flutter_test:

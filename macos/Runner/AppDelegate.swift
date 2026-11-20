@@ -1,5 +1,6 @@
 import Cocoa
 import FlutterMacOS
+import SwiftUI
 
 @main
 class AppDelegate: FlutterAppDelegate {
@@ -27,8 +28,7 @@ final class StatusBarController: NSObject {
   private var item: NSStatusItem?
   private var channel: FlutterMethodChannel?
   private weak var window: NSWindow?
-  private let titleItem = NSMenuItem(title: "Телефон не подключён", action: nil, keyEquivalent: "")
-  private let subtitleItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+  private let card = PhoneCardModel()
   private var actionItems: [NSMenuItem] = []
 
   func attach(messenger: FlutterBinaryMessenger, window: NSWindow) {
@@ -55,9 +55,7 @@ final class StatusBarController: NSObject {
       default: break
       }
       if call.method == "update", let a = call.arguments as? [String: Any] {
-        self.update(connected: a["connected"] as? Bool ?? false,
-                    title: a["title"] as? String ?? "",
-                    subtitle: a["subtitle"] as? String ?? "")
+        self.update(a)
       }
       result(nil)
     }
@@ -69,11 +67,11 @@ final class StatusBarController: NSObject {
     let it = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     it.button?.image = NSImage(systemSymbolName: "iphone.slash", accessibilityDescription: "AndroidLink")
     let menu = NSMenu()
-    titleItem.isEnabled = false
-    subtitleItem.isEnabled = false
-    subtitleItem.isHidden = true
-    menu.addItem(titleItem)
-    menu.addItem(subtitleItem)
+    let cardItem = NSMenuItem()
+    let host = NSHostingView(rootView: PhoneCardView(m: card))
+    host.frame = NSRect(x: 0, y: 0, width: 300, height: 132)
+    cardItem.view = host
+    menu.addItem(cardItem)
     menu.addItem(.separator())
     actionItems = [
       makeItem("Найти телефон", "ring", "speaker.wave.3"),
@@ -88,7 +86,7 @@ final class StatusBarController: NSObject {
     menu.addItem(NSMenuItem(title: "Выйти", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     it.menu = menu
     item = it
-    update(connected: false, title: "", subtitle: "")
+    update([:])
   }
 
   private func makeItem(_ title: String, _ id: String, _ symbol: String) -> NSMenuItem {
@@ -99,14 +97,21 @@ final class StatusBarController: NSObject {
     return m
   }
 
-  private func update(connected: Bool, title: String, subtitle: String) {
+  private func update(_ a: [String: Any]) {
+    let connected = a["connected"] as? Bool ?? false
     item?.button?.image = NSImage(
       systemSymbolName: connected ? "iphone" : "iphone.slash", accessibilityDescription: "AndroidLink")
-    titleItem.title = connected ? title : "Телефон не подключён"
-    subtitleItem.title = subtitle
-    subtitleItem.isHidden = !connected || subtitle.isEmpty
+    card.connected = connected
+    card.name = a["title"] as? String ?? ""
+    card.battery = a["battery"] as? Int ?? -1
+    card.charging = a["charging"] as? Bool ?? false
+    card.unread = a["unread"] as? Int ?? 0
+    card.notifs = a["notifs"] as? Int ?? 0
+    card.missed = a["missed"] as? Int ?? 0
+    card.syncing = a["syncing"] as? Bool ?? false
     actionItems.forEach { $0.isEnabled = connected }
   }
+
 
   @objc private func onAction(_ sender: NSMenuItem) {
     guard let id = sender.representedObject as? String else { return }
@@ -119,5 +124,95 @@ final class StatusBarController: NSObject {
   func showWindow() {
     NSApp.activate(ignoringOtherApps: true)
     window?.makeKeyAndOrderFront(nil)
+  }
+}
+
+// ── Menu bar phone card ─────────────────────────────────────────────────
+
+final class PhoneCardModel: ObservableObject {
+  @Published var connected = false
+  @Published var name = ""
+  @Published var battery = -1
+  @Published var charging = false
+  @Published var unread = 0
+  @Published var notifs = 0
+  @Published var missed = 0
+  @Published var syncing = false
+}
+
+struct PhoneCardView: View {
+  @ObservedObject var m: PhoneCardModel
+
+  private var batteryColor: Color {
+    if m.charging { return .green }
+    return m.battery >= 0 && m.battery <= 20 ? .red : .primary
+  }
+
+  private var batterySymbol: String {
+    if m.charging { return "battery.100.bolt" }
+    switch m.battery {
+    case ..<0: return "battery.0"
+    case ..<13: return "battery.0"
+    case ..<38: return "battery.25"
+    case ..<63: return "battery.50"
+    case ..<88: return "battery.75"
+    default: return "battery.100"
+    }
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack(spacing: 12) {
+        ZStack(alignment: .bottomTrailing) {
+          RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .fill(LinearGradient(colors: m.connected ? [Color(red: 0.2, green: 0.55, blue: 1), Color(red: 0.45, green: 0.3, blue: 0.95)]
+                                                     : [Color.gray.opacity(0.5), Color.gray.opacity(0.3)],
+                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: 40, height: 40)
+            .overlay(Image(systemName: "iphone").font(.system(size: 20, weight: .medium)).foregroundColor(.white))
+          Circle().fill(m.connected ? Color.green : Color.gray)
+            .frame(width: 11, height: 11)
+            .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
+            .offset(x: 3, y: 3)
+        }
+        VStack(alignment: .leading, spacing: 2) {
+          Text(m.connected ? (m.name.isEmpty ? "Телефон" : m.name) : "Телефон не подключён")
+            .font(.system(size: 13, weight: .semibold)).lineLimit(1)
+          HStack(spacing: 5) {
+            if m.connected {
+              Image(systemName: batterySymbol).foregroundColor(batteryColor)
+              Text(m.battery >= 0 ? "\(m.battery)%" : "0%").foregroundColor(.secondary)
+              if m.syncing {
+                Text("· синхронизация…").foregroundColor(.secondary)
+              } else {
+                Text("· подключён").foregroundColor(.secondary)
+              }
+            } else {
+              Text("Ожидание подключения…").foregroundColor(.secondary)
+            }
+          }.font(.system(size: 11))
+        }
+        Spacer(minLength: 0)
+      }
+      HStack(spacing: 8) {
+        stat("message.fill", m.unread, "SMS", .blue)
+        stat("bell.fill", m.notifs, "Уведомл.", .orange)
+        stat("phone.down.fill", m.missed, "Пропущ.", .red)
+      }
+    }
+    .padding(.horizontal, 14).padding(.vertical, 12)
+    .frame(width: 300, height: 132, alignment: .topLeading)
+  }
+
+  private func stat(_ symbol: String, _ n: Int, _ label: String, _ tint: Color) -> some View {
+    VStack(spacing: 3) {
+      HStack(spacing: 4) {
+        Image(systemName: symbol).font(.system(size: 11)).foregroundColor(tint)
+        Text("\(n)").font(.system(size: 14, weight: .semibold, design: .rounded))
+      }
+      Text(label).font(.system(size: 10)).foregroundColor(.secondary)
+    }
+    .frame(maxWidth: .infinity).padding(.vertical, 7)
+    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
   }
 }
