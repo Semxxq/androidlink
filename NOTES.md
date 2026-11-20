@@ -32,5 +32,6 @@
 - Юзер подтвердил: всё работает. Был обрыв 1002 в 16:09 (причина не выяснена, логирование ошибок добавлено, Mac не переустановлен).
 - Ф3 картинки в буфере (91c8b92): Mac — Swift методы clipCount/clipImage/setClipImage в канале androidlink/tray, store поллит changeCount; тип `clip_image` {image: base64 JPEG ≤8МБ}. Android — ClipProvider (content://com.androidlink.clip), приём в LinkService, отправка через плитку ClipPushActivity. Ждёт теста.
 - Mac UI: «?» вместо иконок = не было cupertino_icons в pubspec (добавлен). Menubar — карточка PhoneCardView в AppDelegate.swift (батарея, SMS/уведомл./пропущ. за 24ч), данные из tray.dart. SwiftUI в NSMenu не работал → карточка на чистом AppKit (PhoneCardView.apply).
+- MMS/группы: Android Mms.kt (content://mms, превью JPEG ≤640px base64, sender, names; observer content://mms-sms/), MMS идут в sms_batch (до 300). Mac: threadKey() — группа = "g:"+отсорт. номера, address "a,b,c"; ответ в группу = SMS каждому по отдельности (не групповой MMS). Ждёт теста.
 - Осталось: мерж ветки phase1-core-link в main (по ок юзера); Ф3: картинки в буфере, MMS/группы. Скриншоты недоступны (нет Screen Recording у терминала).
 - Обрыв 1002 повторяется ~раз в сессию, реконнект за 3с — некритично; причину смотреть по логу Android (adb заблокирован).
