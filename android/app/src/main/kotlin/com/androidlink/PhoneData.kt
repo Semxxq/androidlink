@@ -115,8 +115,8 @@ object PhoneData {
             ctx.contentResolver.query(CallLog.Calls.CONTENT_URI, arrayOf(
                 CallLog.Calls._ID, CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NAME,
                 CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.DURATION,
-            ), null, null, "${CallLog.Calls.DATE} DESC LIMIT $limit")?.use { c ->
-                while (c.moveToNext()) {
+            ), null, null, "${CallLog.Calls.DATE} DESC")?.use { c ->
+                while (arr.length() < limit && c.moveToNext()) {
                     val o = JSONObject()
                         .put("id", "log:${c.getLong(0)}")
                         .put("address", c.getString(1) ?: "")
