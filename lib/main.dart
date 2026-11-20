@@ -3,7 +3,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:macos_ui/macos_ui.dart';
-import 'package:window_manager/window_manager.dart';
+import 'package:window_manager/legacy.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/constants/app_constants.dart';

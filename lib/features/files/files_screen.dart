@@ -46,9 +46,9 @@ class _FilesScreenState extends State<FilesScreen> {
   }
 
   Future<void> _sendFile() async {
-    final result = await FilePicker.platform.pickFiles();
-    if (result == null || result.files.single.path == null) return;
-    final file  = result.files.single;
+    final files = await FilePicker.pickFiles();
+    if (files.isEmpty || files.single.path == null) return;
+    final file  = files.single;
     setState(() => _sending = true);
     final bytes = await File(file.path!).readAsBytes();
     BridgeService.instance.sendRaw({
