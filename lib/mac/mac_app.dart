@@ -133,6 +133,11 @@ class _DeviceHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // const instance: rebuild on store changes ourselves.
+    return ListenableBuilder(listenable: MacStore.instance, builder: (context, _) => _build(context));
+  }
+
+  Widget _build(BuildContext context) {
     final s = MacStore.instance;
     final p = Pal.of(context);
     final d = s.device;
@@ -205,6 +210,11 @@ class _SidebarActions extends StatelessWidget {
   const _SidebarActions();
   @override
   Widget build(BuildContext context) {
+    // const instance: rebuild on store changes ourselves.
+    return ListenableBuilder(listenable: MacStore.instance, builder: (context, _) => _build(context));
+  }
+
+  Widget _build(BuildContext context) {
     final s = MacStore.instance;
     return Padding(
       padding: const EdgeInsets.all(10),
