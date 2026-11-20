@@ -1,6 +1,5 @@
 import Cocoa
 import FlutterMacOS
-import SwiftUI
 
 @main
 class AppDelegate: FlutterAppDelegate {
@@ -28,8 +27,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
   private var item: NSStatusItem?
   private var channel: FlutterMethodChannel?
   private weak var window: NSWindow?
-  private let card = PhoneCardModel()
-  private var cardHost: NSHostingView<PhoneCardView>?
+  private let card = PhoneCardView(frame: NSRect(x: 0, y: 0, width: 300, height: 124))
   private var actionItems: [NSMenuItem] = []
 
   func attach(messenger: FlutterBinaryMessenger, window: NSWindow) {
@@ -69,10 +67,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     it.button?.image = NSImage(systemSymbolName: "iphone.slash", accessibilityDescription: "AndroidLink")
     let menu = NSMenu()
     let cardItem = NSMenuItem()
-    let host = NSHostingView(rootView: PhoneCardView(m: card))
-    host.frame = NSRect(x: 0, y: 0, width: 300, height: 132)
-    cardItem.view = host
-    cardHost = host
+    cardItem.view = card
     menu.delegate = self
     menu.addItem(cardItem)
     menu.addItem(.separator())
@@ -104,25 +99,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     let connected = a["connected"] as? Bool ?? false
     item?.button?.image = NSImage(
       systemSymbolName: connected ? "iphone" : "iphone.slash", accessibilityDescription: "AndroidLink")
-    card.connected = connected
-    card.name = a["title"] as? String ?? ""
-    card.battery = a["battery"] as? Int ?? -1
-    card.charging = a["charging"] as? Bool ?? false
-    card.unread = a["unread"] as? Int ?? 0
-    card.notifs = a["notifs"] as? Int ?? 0
-    card.missed = a["missed"] as? Int ?? 0
-    card.syncing = a["syncing"] as? Bool ?? false
+    card.apply(connected: connected,
+               name: a["title"] as? String ?? "",
+               battery: (a["battery"] as? NSNumber)?.intValue ?? -1,
+               charging: (a["charging"] as? NSNumber)?.boolValue ?? false,
+               unread: (a["unread"] as? NSNumber)?.intValue ?? 0,
+               notifs: (a["notifs"] as? NSNumber)?.intValue ?? 0,
+               missed: (a["missed"] as? NSNumber)?.intValue ?? 0,
+               syncing: (a["syncing"] as? NSNumber)?.boolValue ?? false)
     actionItems.forEach { $0.isEnabled = connected }
-    refreshCard()
   }
 
-  private func refreshCard() {
-    // SwiftUI inside an NSMenu does not reliably observe changes; push a fresh snapshot.
-    cardHost?.rootView = PhoneCardView(m: card.snapshot())
-    cardHost?.needsDisplay = true
-  }
-
-  func menuWillOpen(_ menu: NSMenu) { refreshCard() }
+  func menuWillOpen(_ menu: NSMenu) { card.needsDisplay = true }
 
 
   @objc private func onAction(_ sender: NSMenuItem) {
@@ -139,99 +127,106 @@ final class StatusBarController: NSObject, NSMenuDelegate {
   }
 }
 
-// ── Menu bar phone card ─────────────────────────────────────────────────
+// ── Menu bar phone card (plain AppKit: reliable inside NSMenu) ─────────
 
-final class PhoneCardModel: ObservableObject {
-  @Published var connected = false
-  @Published var name = ""
-  @Published var battery = -1
-  @Published var charging = false
-  @Published var unread = 0
-  @Published var notifs = 0
-  @Published var missed = 0
-  @Published var syncing = false
+final class PhoneCardView: NSView {
+  private let tile = NSView()
+  private let phone = NSImageView()
+  private let dot = NSView()
+  private let name = NSTextField(labelWithString: "Телефон не подключён")
+  private let batteryIcon = NSImageView()
+  private let status = NSTextField(labelWithString: "Ожидание подключения…")
+  private var stats: [(NSTextField, NSImageView)] = []
 
-  func snapshot() -> PhoneCardModel {
-    let c = PhoneCardModel()
-    c.connected = connected; c.name = name; c.battery = battery; c.charging = charging
-    c.unread = unread; c.notifs = notifs; c.missed = missed; c.syncing = syncing
-    return c
-  }
-}
+  override init(frame: NSRect) {
+    super.init(frame: frame)
+    wantsLayer = true
 
-struct PhoneCardView: View {
-  @ObservedObject var m: PhoneCardModel
+    tile.wantsLayer = true
+    tile.layer?.cornerRadius = 10
+    tile.frame = NSRect(x: 14, y: frame.height - 54, width: 40, height: 40)
+    addSubview(tile)
+    phone.image = NSImage(systemSymbolName: "iphone", accessibilityDescription: nil)?
+      .withSymbolConfiguration(.init(pointSize: 20, weight: .medium))
+    phone.contentTintColor = .white
+    phone.frame = tile.bounds
+    tile.addSubview(phone)
 
-  private var batteryColor: Color {
-    if m.charging { return .green }
-    return m.battery >= 0 && m.battery <= 20 ? .red : .primary
-  }
+    dot.wantsLayer = true
+    dot.layer?.cornerRadius = 6
+    dot.layer?.borderWidth = 2
+    dot.layer?.borderColor = NSColor.windowBackgroundColor.cgColor
+    dot.frame = NSRect(x: 45, y: frame.height - 58, width: 12, height: 12)
+    addSubview(dot)
 
-  private var batterySymbol: String {
-    if m.charging { return "battery.100.bolt" }
-    switch m.battery {
-    case ..<0: return "battery.0"
-    case ..<13: return "battery.0"
-    case ..<38: return "battery.25"
-    case ..<63: return "battery.50"
-    case ..<88: return "battery.75"
-    default: return "battery.100"
+    name.font = .systemFont(ofSize: 13, weight: .semibold)
+    name.lineBreakMode = .byTruncatingTail
+    name.frame = NSRect(x: 66, y: frame.height - 34, width: 220, height: 18)
+    addSubview(name)
+
+    batteryIcon.frame = NSRect(x: 66, y: frame.height - 53, width: 22, height: 14)
+    addSubview(batteryIcon)
+    status.font = .systemFont(ofSize: 11)
+    status.textColor = .secondaryLabelColor
+    status.frame = NSRect(x: 66, y: frame.height - 54, width: 220, height: 15)
+    addSubview(status)
+
+    let items: [(String, String, NSColor)] = [
+      ("message.fill", "SMS", .systemBlue),
+      ("bell.fill", "Уведомл.", .systemOrange),
+      ("phone.down.fill", "Пропущ.", .systemRed),
+    ]
+    let w: CGFloat = (frame.width - 28 - 16) / 3
+    for (i, it) in items.enumerated() {
+      let box = NSView(frame: NSRect(x: 14 + CGFloat(i) * (w + 8), y: 10, width: w, height: 46))
+      box.wantsLayer = true
+      box.layer?.cornerRadius = 8
+      box.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.07).cgColor
+      let icon = NSImageView(frame: NSRect(x: w / 2 - 22, y: 22, width: 16, height: 16))
+      icon.image = NSImage(systemSymbolName: it.0, accessibilityDescription: nil)
+      icon.contentTintColor = it.2
+      let n = NSTextField(labelWithString: "0")
+      n.font = .monospacedDigitSystemFont(ofSize: 14, weight: .semibold)
+      n.frame = NSRect(x: w / 2 - 4, y: 21, width: w / 2, height: 18)
+      let l = NSTextField(labelWithString: it.1)
+      l.font = .systemFont(ofSize: 10)
+      l.textColor = .secondaryLabelColor
+      l.alignment = .center
+      l.frame = NSRect(x: 0, y: 5, width: w, height: 14)
+      [icon, n, l].forEach { box.addSubview($0) }
+      addSubview(box)
+      stats.append((n, icon))
     }
+    apply(connected: false, name: "", battery: -1, charging: false, unread: 0, notifs: 0, missed: 0, syncing: false)
   }
 
-  var body: some View {
-    VStack(alignment: .leading, spacing: 10) {
-      HStack(spacing: 12) {
-        ZStack(alignment: .bottomTrailing) {
-          RoundedRectangle(cornerRadius: 10, style: .continuous)
-            .fill(LinearGradient(colors: m.connected ? [Color(red: 0.2, green: 0.55, blue: 1), Color(red: 0.45, green: 0.3, blue: 0.95)]
-                                                     : [Color.gray.opacity(0.5), Color.gray.opacity(0.3)],
-                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-            .frame(width: 40, height: 40)
-            .overlay(Image(systemName: "iphone").font(.system(size: 20, weight: .medium)).foregroundColor(.white))
-          Circle().fill(m.connected ? Color.green : Color.gray)
-            .frame(width: 11, height: 11)
-            .overlay(Circle().stroke(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
-            .offset(x: 3, y: 3)
-        }
-        VStack(alignment: .leading, spacing: 2) {
-          Text(m.connected ? (m.name.isEmpty ? "Телефон" : m.name) : "Телефон не подключён")
-            .font(.system(size: 13, weight: .semibold)).lineLimit(1)
-          HStack(spacing: 5) {
-            if m.connected {
-              Image(systemName: batterySymbol).foregroundColor(batteryColor)
-              Text(m.battery >= 0 ? "\(m.battery)%" : "0%").foregroundColor(.secondary)
-              if m.syncing {
-                Text("· синхронизация…").foregroundColor(.secondary)
-              } else {
-                Text("· подключён").foregroundColor(.secondary)
-              }
-            } else {
-              Text("Ожидание подключения…").foregroundColor(.secondary)
-            }
-          }.font(.system(size: 11))
-        }
-        Spacer(minLength: 0)
-      }
-      HStack(spacing: 8) {
-        stat("message.fill", m.unread, "SMS", .blue)
-        stat("bell.fill", m.notifs, "Уведомл.", .orange)
-        stat("phone.down.fill", m.missed, "Пропущ.", .red)
-      }
-    }
-    .padding(.horizontal, 14).padding(.vertical, 12)
-    .frame(width: 300, height: 132, alignment: .topLeading)
-  }
+  required init?(coder: NSCoder) { fatalError() }
 
-  private func stat(_ symbol: String, _ n: Int, _ label: String, _ tint: Color) -> some View {
-    VStack(spacing: 3) {
-      HStack(spacing: 4) {
-        Image(systemName: symbol).font(.system(size: 11)).foregroundColor(tint)
-        Text("\(n)").font(.system(size: 14, weight: .semibold, design: .rounded))
-      }
-      Text(label).font(.system(size: 10)).foregroundColor(.secondary)
-    }
-    .frame(maxWidth: .infinity).padding(.vertical, 7)
-    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
+  func apply(connected: Bool, name n: String, battery: Int, charging: Bool,
+             unread: Int, notifs: Int, missed: Int, syncing: Bool) {
+    let grad = CAGradientLayer()
+    grad.frame = tile.bounds
+    grad.cornerRadius = 10
+    grad.startPoint = CGPoint(x: 0, y: 1)
+    grad.endPoint = CGPoint(x: 1, y: 0)
+    grad.colors = connected
+      ? [NSColor(red: 0.2, green: 0.56, blue: 1, alpha: 1).cgColor, NSColor(red: 0.45, green: 0.3, blue: 0.95, alpha: 1).cgColor]
+      : [NSColor.systemGray.cgColor, NSColor.systemGray.withAlphaComponent(0.6).cgColor]
+    tile.layer?.sublayers?.filter { $0 is CAGradientLayer }.forEach { $0.removeFromSuperlayer() }
+    tile.layer?.insertSublayer(grad, at: 0)
+    dot.layer?.backgroundColor = (connected ? NSColor.systemGreen : NSColor.systemGray).cgColor
+
+    name.stringValue = connected ? (n.isEmpty ? "Телефон" : n) : "Телефон не подключён"
+    let lvl = max(battery, 0)
+    let sym = charging ? "battery.100.bolt"
+      : lvl < 13 ? "battery.0" : lvl < 38 ? "battery.25" : lvl < 63 ? "battery.50" : lvl < 88 ? "battery.75" : "battery.100"
+    batteryIcon.image = NSImage(systemSymbolName: sym, accessibilityDescription: nil)
+    batteryIcon.contentTintColor = charging ? .systemGreen : (lvl <= 20 ? .systemRed : .labelColor)
+    batteryIcon.isHidden = !connected
+    status.frame.origin.x = connected ? 92 : 66
+    status.stringValue = connected ? "\(lvl)% · \(syncing ? "синхронизация…" : "подключён")" : "Ожидание подключения…"
+
+    for (i, v) in [unread, notifs, missed].enumerated() { stats[i].0.stringValue = "\(v)" }
+    needsDisplay = true
   }
 }
