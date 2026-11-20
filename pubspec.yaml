@@ -13,21 +13,11 @@ dependencies:
 
   # ── Сеть ──────────────────────────────────────────────────────────
   web_socket_channel: ^3.0.1
-  network_info_plus: ^5.0.0
-  connectivity_plus: ^6.0.5
-
   # ── macOS UI ──────────────────────────────────────────────────────
-  macos_ui: ^2.0.0
-  window_manager: ^0.3.9
-  local_notifier: ^0.1.6
-
+  macos_ui: ^2.2.2
   # ── State ─────────────────────────────────────────────────────────
-  provider: ^6.1.2
-
   # ── Android: SMS и звонки ─────────────────────────────────────────
-  permission_handler: ^11.3.1
-  flutter_contacts: ^1.1.9+1
-
+  permission_handler: ^13.0.2
   # ── UI ────────────────────────────────────────────────────────────
   flutter_animate: ^4.5.0
   timeago: ^3.7.0
@@ -35,23 +25,27 @@ dependencies:
   # ── Утилиты ───────────────────────────────────────────────────────
   uuid: ^4.5.1
   logger: ^2.4.0
-  device_info_plus: ^10.1.2
   path_provider: ^2.1.4
-  file_picker: ^8.1.2
+  file_picker: ^13.4.0
   rxdart: ^0.28.0
-  flutter_secure_storage: ^9.2.2
-
+  equatable: ^2.0.7
+  cryptography: ^2.7.0
   # ── QR-код ────────────────────────────────────────────────────────────
   qr_flutter: ^4.1.0
-  mobile_scanner: ^5.2.3
+  mobile_scanner: ^7.5.0
+  flutter_local_notifications: ^23.0.3
+  desktop_drop: ^0.8.0
+  cryptography_flutter: ^2.3.4
+  intl: ^0.20.3
+  macos_window_utils: ^1.9.1
+  flutter_localizations:
+    sdk: flutter
+  cupertino_icons: ^2.0.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^4.0.0
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/images/
-    - assets/icons/

@@ -1,315 +1,621 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+
+import 'package:cryptography/cryptography.dart';
+import 'package:flutter/services.dart';
 import 'package:logger/logger.dart';
-import 'package:network_info_plus/network_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:uuid/uuid.dart';
-import 'package:web_socket_channel/io.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../../core/constants/app_constants.dart';
+import 'link_crypto.dart';
 
 enum BridgeStatus { disconnected, searching, connecting, connected }
 
 class BridgeMessage {
-  const BridgeMessage({required this.type, required this.payload, this.id});
+  const BridgeMessage({
+    required this.type,
+    required this.payload,
+    this.id,
+    this.deviceId,
+  });
 
   final String type;
   final Map<String, dynamic> payload;
   final String? id;
 
-  factory BridgeMessage.fromJson(String raw) {
-    final m = jsonDecode(raw) as Map<String, dynamic>;
-    return BridgeMessage(
-      type:    m['type'] as String,
-      payload: (m['payload'] as Map?)?.cast<String, dynamic>() ?? {},
-      id:      m['id'] as String?,
-    );
-  }
+  /// Mac side: which phone sent it.
+  final String? deviceId;
 
-  String toJson() => jsonEncode({
-        'type':    type,
-        'payload': payload,
-        'id':      id ?? const Uuid().v4(),
-      });
+  factory BridgeMessage.fromMap(Map<String, dynamic> m, {String? deviceId}) =>
+      BridgeMessage(
+        type: m['type'] as String? ?? '',
+        payload: (m['payload'] as Map?)?.cast<String, dynamic>() ?? {},
+        id: m['id'] as String?,
+        deviceId: deviceId,
+      );
+
+  factory BridgeMessage.fromJson(String raw, {String? deviceId}) =>
+      BridgeMessage.fromMap(jsonDecode(raw) as Map<String, dynamic>,
+          deviceId: deviceId);
 }
 
-/// Mac запускает WebSocket-сервер и рассылает UDP-beacon каждые 2 сек.
-/// Android слушает UDP, находит IP мака, подключается по WebSocket.
-/// Несколько Android-устройств могут подключаться одновременно.
+/// A phone as seen by the Mac.
+class PeerInfo {
+  PeerInfo({required this.id, required this.name});
+  final String id;
+  String name;
+  int battery = -1;
+  bool charging = false;
+  String? model;
+  String? android;
+}
+
+/// Facade used by the UI on both platforms.
+///
+/// Mac: encrypted WebSocket server + UDP beacon + QR pairing ([_MacHost]).
+/// Android: proxy to the native foreground `LinkService` ([_PhoneLink]),
+/// so the link survives the UI being closed.
 class BridgeService {
   BridgeService._();
   static final BridgeService instance = BridgeService._();
 
-  final _log     = Logger();
-  final _uuid    = const Uuid();
-  final _netInfo = NetworkInfo();
+  final _log = Logger();
+  final _uuid = const Uuid();
 
-  final _statusStream          = BehaviorSubject<BridgeStatus>.seeded(BridgeStatus.disconnected);
-  final _messageStream         = StreamController<BridgeMessage>.broadcast();
-  final _connectedDevicesCount = BehaviorSubject<int>.seeded(0);
+  final _status = BehaviorSubject<BridgeStatus>.seeded(BridgeStatus.disconnected);
+  final _messages = StreamController<BridgeMessage>.broadcast();
+  final _devices = BehaviorSubject<List<PeerInfo>>.seeded(const []);
+  final _qr = BehaviorSubject<String?>.seeded(null);
+  final _issue = BehaviorSubject<String?>.seeded(null);
+  final _peerName = BehaviorSubject<String?>.seeded(null);
+  final _nativeTransfers = StreamController<Map<String, dynamic>>.broadcast();
+  final _diag = BehaviorSubject<String>.seeded('');
 
-  Stream<BridgeStatus>  get status           => _statusStream.stream;
-  Stream<BridgeMessage> get messages         => _messageStream.stream;
-  Stream<int>           get deviceCount      => _connectedDevicesCount.stream;
-  BridgeStatus          get currentStatus    => _statusStream.value;
-  bool                  get isConnected      => currentStatus == BridgeStatus.connected;
-  String?               get localIp          => _localIp;
+  Stream<BridgeStatus> get status => _status.stream;
+  Stream<BridgeMessage> get messages => _messages.stream;
+  Stream<List<PeerInfo>> get devices => _devices.stream;
+  Stream<int> get deviceCount => _devices.stream.map((d) => d.length);
+  List<PeerInfo> get currentDevices => _devices.value;
+  BridgeStatus get currentStatus => _status.value;
+  bool get isConnected => currentStatus == BridgeStatus.connected;
 
-  /// QR-данные для отображения на Маке: androidlink://IP:PORT
-  String? get qrData =>
-      _localIp != null ? 'androidlink://$_localIp:${AL.wsPort}' : null;
+  /// Mac: pairing QR (rotates after every successful pairing / IP change).
+  Stream<String?> get qrStream => _qr.stream;
+  String? get qrData => _qr.value;
+  String? get localIp => _mac?._ips.firstOrNull;
 
-  // Mac: список подключённых клиентов
-  final List<WebSocket> _clients = [];
-  HttpServer?           _wsServer;
-  RawDatagramSocket?    _udpBroadcastSocket;
-  Timer?                _broadcastTimer;
+  /// Android: 'unpaired' | 'unauthorized' | null.
+  Stream<String?> get pairingIssue => _issue.stream;
 
-  // Android: одно соединение с Маком
-  WebSocketChannel? _channel;
-  Timer?            _heartbeatTimer;
-  Timer?            _reconnectTimer;
-  RawDatagramSocket? _udpListenSocket;
-  String?           _lastMacIp;
-  String?           _localIp;
+  /// Android: name of the paired Mac.
+  Stream<String?> get peerName => _peerName.stream;
+
+  /// Android: last connection error / progress from the native service.
+  Stream<String> get diag => _diag.stream;
+
+  /// Android: full diagnostics (hosts tried, phone IPs, last beacon…).
+  Future<Map<String, dynamic>> diagnostics() async => await _phone?.diagnostics() ?? const {};
+
+  /// Android: file transfer progress reported by the native service.
+  Stream<Map<String, dynamic>> get nativeTransfers => _nativeTransfers.stream;
+
+  _MacHost? _mac;
+  _PhoneLink? _phone;
 
   Future<void> init() async {
-    _localIp = await _netInfo.getWifiIP();
-    final isMac = defaultTargetPlatform == TargetPlatform.macOS;
-    if (isMac) {
-      await _startServer();
-      _startUdpBroadcast();
+    if (Platform.isMacOS) {
+      _mac = _MacHost(this);
+      await _mac!.start();
+    } else if (Platform.isAndroid) {
+      _phone = _PhoneLink(this);
+      await _phone!.start();
+    }
+  }
+
+  void send(BridgeMessage m, {String? deviceId}) {
+    if (_mac != null) {
+      _mac!.send(m.type, m.payload, m.id ?? _uuid.v4(), deviceId: deviceId ?? m.deviceId);
     } else {
-      _listenForMacUdp();
+      _phone?.send(m.type, m.payload);
     }
   }
 
-  // ══ MAC: WebSocket сервер ══════════════════════════════════════════════
+  void sendRaw(Map<String, dynamic> payload, String type, {String? deviceId}) =>
+      send(BridgeMessage(type: type, payload: payload, id: _uuid.v4()),
+          deviceId: deviceId);
 
-  Future<void> _startServer() async {
+  // ── Android ──
+  Future<bool> connectViaQr(String qr) async => await _phone?.pair(qr) ?? false;
+  Future<bool> connectToMacDirectly(String ip) async => await _phone?.connectIp(ip) ?? false;
+  Future<void> unpair() async => _phone?.unpair();
+  Future<void> sendFiles(List<String> paths) async => _phone?.sendFiles(paths);
+
+  // ── Mac ──
+  List<PeerInfo> get pairedDevices => _mac?.paired ?? const [];
+  Future<void> forgetDevice(String id) async => _mac?.forget(id);
+
+  void disconnect() => _mac?.stop();
+}
+
+// ═══════════════════════════════ MAC ═══════════════════════════════════
+
+class _Paired {
+  _Paired(this.id, this.name, this.keyB64);
+  final String id;
+  String name;
+  final String keyB64;
+  SecretKey get key => SecretKey(base64Decode(keyB64));
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'k': keyB64};
+}
+
+class _Peer {
+  _Peer(this.ws, this.info, this.key, this.phoneSid, this.macSid);
+  final WebSocket ws;
+  final PeerInfo info;
+  final SecretKey key;
+  final String phoneSid;
+  final String macSid;
+
+  // Crypto is async; chain keeps frame order.
+  Future<void> _inChain = Future.value();
+  Future<void> _outChain = Future.value();
+  void inbound(Future<void> Function() f) =>
+      _inChain = _inChain.then((_) => f()).catchError((Object _) {});
+  void outbound(Future<void> Function() f) =>
+      _outChain = _outChain.then((_) => f()).catchError((Object _) {});
+}
+
+class _MacHost {
+  _MacHost(this.b);
+  final BridgeService b;
+  Logger get _log => b._log;
+
+  static const _beaconTag = 'ANDROIDLINK2';
+
+  late File _storeFile;
+  IOSink? _diagLog;
+
+  /// Connection diagnostics → Application Support/diag.log
+  void diag(String m) {
+    _log.i(m);
+    _diagLog?.writeln('${DateTime.now().toIso8601String()} $m');
+  }
+  String _macId = '';
+  final Map<String, _Paired> _pairedMap = {};
+  final List<_Peer> _peers = [];
+
+  List<String> _ips = [];
+  int _port = AL.wsPort;
+  HttpServer? _server;
+  Timer? _beaconTimer;
+  Timer? _ipTimer;
+  int _beaconFails = 0;
+
+  // Pending pairing shown in the QR. Single use.
+  late List<int> _pendingKey;
+  late String _pendingId;
+
+  String get _macName {
+    final h = Platform.localHostname.replaceAll(RegExp(r'\.local$'), '');
+    return h.replaceAll('-', ' ');
+  }
+
+  List<PeerInfo> get paired =>
+      _pairedMap.values.map((p) => PeerInfo(id: p.id, name: p.name)).toList();
+
+  Future<void> start() async {
+    await _load();
+    _rotatePairing();
+    await _bindServer();
+    await _refreshIps();
+    _ipTimer = Timer.periodic(const Duration(seconds: 5), (_) => _refreshIps());
+    await _startBeacon();
+  }
+
+  void stop() {
+    _beaconTimer?.cancel();
+    _ipTimer?.cancel();
+    for (final u in _udpByIp.values) {
+      u.close();
+    }
+    for (final p in List.of(_peers)) {
+      p.ws.close(1001, 'shutdown');
+    }
+    _peers.clear();
+    _server?.close(force: true);
+    b._status.add(BridgeStatus.disconnected);
+  }
+
+  // ── storage ──
+
+  Future<void> _load() async {
+    final dir = await getApplicationSupportDirectory();
+    await dir.create(recursive: true);
+    _storeFile = File('${dir.path}/pairing.json');
+    final lf = File('${dir.path}/diag.log');
+    if (await lf.exists() && await lf.length() > 512 * 1024) await lf.delete();
+    _diagLog = lf.openWrite(mode: FileMode.append);
     try {
-      _wsServer = await HttpServer.bind(InternetAddress.anyIPv4, AL.wsPort);
-      _statusStream.add(BridgeStatus.searching);
-      _log.i('WS server ready on :${AL.wsPort}');
+      final m = jsonDecode(await _storeFile.readAsString()) as Map<String, dynamic>;
+      _macId = m['macId'] as String? ?? '';
+      for (final d in (m['devices'] as List? ?? const [])) {
+        final dm = (d as Map).cast<String, dynamic>();
+        _pairedMap[dm['id'] as String] =
+            _Paired(dm['id'] as String, dm['name'] as String? ?? 'Android', dm['k'] as String);
+      }
+    } catch (_) {/* first run */}
+    if (_macId.isEmpty) {
+      _macId = LinkCrypto.randomId();
+      await _save();
+    }
+  }
 
-      _wsServer!.transform(WebSocketTransformer()).listen((ws) {
-        _clients.add(ws);
-        _connectedDevicesCount.add(_clients.length);
-        _statusStream.add(BridgeStatus.connected);
-        _log.i('Android connected. Total: ${_clients.length}');
+  Future<void> _save() async {
+    final tmp = File('${_storeFile.path}.tmp');
+    await tmp.writeAsString(jsonEncode({
+      'macId': _macId,
+      'devices': _pairedMap.values.map((p) => p.toJson()).toList(),
+    }));
+    await tmp.rename(_storeFile.path);
+  }
 
-        ws.listen(
-          (raw) {
-            if (raw is! String) return;
-            try {
-              final msg = BridgeMessage.fromJson(raw);
-              if (msg.type == AL.typePing) {
-                ws.add(BridgeMessage(type: AL.typePong, payload: {}).toJson());
-                return;
-              }
-              _messageStream.add(msg);
-            } catch (e) {
-              _log.e('Parse error', error: e);
-            }
-          },
-          onDone: () => _removeClient(ws),
-          onError: (_) => _removeClient(ws),
-          cancelOnError: true,
-        );
-      });
+  Future<void> forget(String id) async {
+    _pairedMap.remove(id);
+    await _save();
+    for (final p in _peers.where((p) => p.info.id == id).toList()) {
+      p.ws.close(4401, 'forgotten');
+    }
+  }
+
+  // ── pairing QR ──
+
+  void _rotatePairing() {
+    _pendingKey = LinkCrypto.randomBytes(32);
+    _pendingId = LinkCrypto.randomId();
+    _publishQr();
+  }
+
+  void _publishQr() {
+    if (_ips.isEmpty) {
+      b._qr.add(null);
+      return;
+    }
+    final uri = Uri(scheme: 'androidlink', host: 'pair', queryParameters: {
+      'h': _ips.join(','),
+      'p': '$_port',
+      'k': base64Url.encode(_pendingKey).replaceAll('=', ''),
+      'i': _pendingId,
+      'm': _macId,
+      'n': _macName,
+    });
+    b._qr.add(uri.toString());
+  }
+
+  Future<void> _refreshIps() async {
+    try {
+      final ifs = await NetworkInterface.list(type: InternetAddressType.IPv4);
+      final ifsAll = List.of(ifs);
+      // VPN tunnels (utun/ipsec/ppp) are unreachable for the phone — LAN only.
+      bool vpn(NetworkInterface i) => RegExp(r'^(utun|ipsec|ppp|tun|tap|wg)').hasMatch(i.name);
+      int rank(NetworkInterface i) => i.name.startsWith('en') ? 0 : 1;
+      ifs.removeWhere(vpn);
+      ifs.sort((a, c) => rank(a).compareTo(rank(c)));
+      final ips = <String>[
+        for (final i in ifs)
+          for (final a in i.addresses)
+            if (!a.isLoopback && !a.isLinkLocal) a.address,
+      ];
+      if (ips.join(',') != _ips.join(',')) {
+        _ips = ips;
+        diag('Mac IPs: $_ips (all: ${ifsAll.map((i) => '${i.name}=${i.addresses.map((a) => a.address).join('/')}').join(', ')})');
+        _publishQr();
+      }
     } catch (e) {
-      _log.e('Server start failed', error: e);
+      _log.w('IP refresh failed: $e');
     }
   }
 
-  void _removeClient(WebSocket ws) {
-    _clients.remove(ws);
-    _connectedDevicesCount.add(_clients.length);
-    if (_clients.isEmpty) _statusStream.add(BridgeStatus.searching);
-    _log.w('Android disconnected. Remaining: ${_clients.length}');
-  }
+  // ── server ──
 
-  // ══ MAC: UDP beacon ════════════════════════════════════════════════════
-
-  void _startUdpBroadcast() async {
-    if (_localIp == null) return;
-    try {
-      _udpBroadcastSocket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-      _udpBroadcastSocket!.broadcastEnabled = true;
-      final msg = utf8.encode('ANDROIDLINK:$_localIp:${AL.wsPort}');
-
-      // Compute subnet broadcast (assume /24: 192.168.x.255)
-      final subnetBroadcast = _subnetBroadcast(_localIp!);
-
-      _broadcastTimer = Timer.periodic(const Duration(seconds: 2), (_) {
-        try {
-          // Send to both 255.255.255.255 and subnet broadcast
-          _udpBroadcastSocket?.send(
-              msg, InternetAddress('255.255.255.255'), AL.udpPort);
-          if (subnetBroadcast != null) {
-            _udpBroadcastSocket?.send(
-                msg, InternetAddress(subnetBroadcast), AL.udpPort);
-          }
-        } catch (_) {}
-      });
-      _log.i('UDP broadcast started: $_localIp → $subnetBroadcast');
-    } catch (e) {
-      _log.e('UDP broadcast failed: $e');
+  Future<void> _bindServer() async {
+    for (var p = AL.wsPort; p < AL.wsPort + 6; p++) {
+      try {
+        _server = await HttpServer.bind(InternetAddress.anyIPv4, p);
+        _port = p;
+        break;
+      } catch (_) {}
     }
-  }
-
-  String? _subnetBroadcast(String ip) {
-    try {
-      final parts = ip.split('.');
-      if (parts.length != 4) return null;
-      return '${parts[0]}.${parts[1]}.${parts[2]}.255';
-    } catch (_) {
-      return null;
+    if (_server == null) {
+      _log.e('No free port for WS server');
+      return;
     }
-  }
-
-  // ══ ANDROID: UDP listener ══════════════════════════════════════════════
-
-  Future<void> _listenForMacUdp() async {
-    _statusStream.add(BridgeStatus.searching);
-    try {
-      _udpListenSocket?.close();
-      _udpListenSocket = await RawDatagramSocket.bind(
-          InternetAddress.anyIPv4, AL.udpPort);
-      _log.i('Listening for Mac on UDP :${AL.udpPort}');
-
-      _udpListenSocket!.listen((event) {
-        if (event != RawSocketEvent.read) return;
-        final dg = _udpListenSocket?.receive();
-        if (dg == null) return;
-        final msg = utf8.decode(dg.data);
-        if (!msg.startsWith('ANDROIDLINK:')) return;
-        final parts = msg.split(':');
-        if (parts.length < 3) return;
-        final ip = parts[1];
-        _log.i('Found Mac at $ip via UDP beacon');
-        _udpListenSocket?.close();
-        _udpListenSocket = null;
-        _connectToMac(ip);
-      });
-    } catch (e) {
-      _log.e('UDP listen failed: $e');
-      _reconnectTimer?.cancel();
-      _reconnectTimer =
-          Timer(const Duration(seconds: 5), _listenForMacUdp);
-    }
-  }
-
-  Future<void> connectToMacDirectly(String ip) async {
-    _lastMacIp = ip;
-    _udpListenSocket?.close();
-    _udpListenSocket = null;
-    _connectToMac(ip);
-  }
-
-  /// Подключение через QR: данные вида "androidlink://192.168.x.x:41234"
-  Future<void> connectViaQr(String qrValue) async {
-    final uri = Uri.tryParse(qrValue);
-    if (uri == null || uri.scheme != 'androidlink') return;
-    final ip = uri.host;
-    if (ip.isEmpty) return;
-    connectToMacDirectly(ip);
-  }
-
-  Future<void> _connectToMac(String ip) async {
-    _statusStream.add(BridgeStatus.connecting);
-    _lastMacIp = ip;
-    try {
-      final uri = Uri.parse('ws://$ip:${AL.wsPort}');
-      _channel  = IOWebSocketChannel.connect(uri,
-          connectTimeout: const Duration(seconds: 8));
-      await _channel!.ready;
-      _statusStream.add(BridgeStatus.connected);
-      _log.i('Connected to Mac at $ip');
-      _startListening();
-      _startHeartbeat();
-    } catch (e) {
-      _log.e('Connection failed: $e');
-      _statusStream.add(BridgeStatus.disconnected);
-      _scheduleReconnect();
-    }
-  }
-
-  void _scheduleReconnect() {
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 5), () {
-      if (_lastMacIp != null) {
-        _connectToMac(_lastMacIp!);
-      } else {
-        _listenForMacUdp();
+    b._status.add(BridgeStatus.searching);
+    diag('WS server listening on 0.0.0.0:$_port');
+    _server!.listen((req) async {
+      diag('HTTP ${req.method} ${req.uri} from ${req.connectionInfo?.remoteAddress.address}:${req.connectionInfo?.remotePort}');
+      if (!WebSocketTransformer.isUpgradeRequest(req)) {
+        diag('not a WebSocket upgrade: headers=${req.headers}');
+        req.response.statusCode = HttpStatus.notFound;
+        await req.response.close();
+        return;
+      }
+      try {
+        // No permessage-deflate: OkHttp rejects the "client_max_window_bits" Dart
+        // answers with, and encrypted frames do not compress anyway.
+        _onSocket(await WebSocketTransformer.upgrade(req, compression: CompressionOptions.compressionOff));
+      } catch (e, st) {
+        diag('upgrade failed: $e\n$st');
       }
     });
   }
 
-  // ══ Общее ════════════════════════════════════════════════════════════
+  void _onSocket(WebSocket ws) {
+    ws.pingInterval = const Duration(seconds: 10);
+    _Peer? peer;
+    final helloTimer = Timer(const Duration(seconds: 10), () {
+      if (peer == null) ws.close(4408, 'hello timeout');
+    });
+    void done() {
+      helloTimer.cancel();
+      if (peer != null) _removePeer(peer!);
+    }
 
-  void _startListening() {
-    _channel?.stream.listen(
+    diag('socket open, waiting for hello');
+    ws.listen(
       (raw) {
-        if (raw is! String) return;
-        try {
-          final msg = BridgeMessage.fromJson(raw);
-          if (msg.type == AL.typePong) return;
-          _messageStream.add(msg);
-        } catch (e) {
-          _log.e('Parse error', error: e);
+        if (raw is! String) {
+          diag('binary frame ignored (${(raw as List).length} bytes)');
+          return;
         }
+        final p = peer;
+        if (p == null) {
+          peer = _handshake(ws, raw);
+          if (peer != null) helloTimer.cancel();
+          return;
+        }
+        p.inbound(() => _onFrame(p, raw));
       },
-      onDone:  _onDisconnected,
-      onError: (_) => _onDisconnected(),
+      onDone: () {
+        if (peer == null) diag('closed before hello: code=${ws.closeCode} reason=${ws.closeReason}');
+        done();
+      },
+      onError: (Object e, StackTrace st) {
+        diag('socket error (${peer?.info.name ?? 'before hello'}): $e');
+        done();
+      },
+      cancelOnError: true,
     );
   }
 
-  void send(BridgeMessage message) {
-    final isMac = defaultTargetPlatform == TargetPlatform.macOS;
-    if (isMac) {
-      final json = message.toJson();
-      for (final ws in List.of(_clients)) {
-        try { ws.add(json); } catch (_) {}
-      }
+  _Peer? _handshake(WebSocket ws, String raw) {
+    Map<String, dynamic> h;
+    try {
+      h = jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      ws.close(4400, 'bad hello');
+      return null;
+    }
+    final deviceId = h['device'] as String? ?? '';
+    final phoneSid = h['s'] as String? ?? '';
+    final name = h['name'] as String? ?? 'Android';
+    final pairId = h['pair'] as String?;
+    if (deviceId.isEmpty || phoneSid.isEmpty) {
+      diag('hello rejected: missing fields');
+      ws.close(4400, 'bad hello');
+      return null;
+    }
+
+    _Paired? rec;
+    if (pairId != null && pairId == _pendingId) {
+      rec = _Paired(deviceId, name, base64Encode(_pendingKey));
+      _pairedMap[deviceId] = rec;
+      _save();
+      _rotatePairing();
+      _log.i('Paired new device $name');
     } else {
-      if (!isConnected) return;
-      _channel?.sink.add(message.toJson());
+      rec = _pairedMap[deviceId];
+    }
+    diag('hello from $name ($deviceId) pair=${pairId ?? '-'} pending=$_pendingId known=${_pairedMap.containsKey(deviceId)}');
+    if (rec == null) {
+      diag('→ rejected 4401 (unknown device / stale QR)');
+      ws.close(4401, 'unpaired');
+      return null;
+    }
+
+    // One live socket per phone.
+    for (final old in _peers.where((p) => p.info.id == deviceId).toList()) {
+      _peers.remove(old);
+      old.ws.close(1000, 'replaced');
+    }
+
+    final peer = _Peer(ws, PeerInfo(id: deviceId, name: rec.name), rec.key,
+        phoneSid, LinkCrypto.randomId());
+    _peers.add(peer);
+    _emitPeers();
+    _sendTo(peer, 'welcome', {'mac': _macId, 'name': _macName, 's': peer.macSid},
+        LinkCrypto.randomId());
+    diag('connected: ${peer.info.name}. Total: ${_peers.length}');
+    return peer;
+  }
+
+  Future<void> _onFrame(_Peer p, String raw) async {
+    final plain = await LinkCrypto.open(p.key, raw);
+    if (plain == null) {
+      diag('frame from ${p.info.name} failed to decrypt → 4403');
+      await p.ws.close(4403, 'bad frame');
+      return;
+    }
+    final env = jsonDecode(plain) as Map<String, dynamic>;
+    if (env['s'] != p.macSid) return;
+    final msg = BridgeMessage.fromMap(env, deviceId: p.info.id);
+
+    if (msg.type == 'device_info' || msg.type == 'battery') {
+      final pl = msg.payload;
+      if (pl['name'] is String && pl['name'] != p.info.name) {
+        p.info.name = pl['name'] as String;
+        _pairedMap[p.info.id]?.name = p.info.name;
+        _save();
+      }
+      p.info.model = pl['model'] as String? ?? p.info.model;
+      p.info.android = pl['android'] as String? ?? p.info.android;
+      final lvl = pl['battery'] ?? pl['level'];
+      if (lvl is int) p.info.battery = lvl;
+      if (pl['charging'] is bool) p.info.charging = pl['charging'] as bool;
+      _emitPeers();
+    }
+    b._messages.add(msg);
+  }
+
+  void _removePeer(_Peer p) {
+    if (!_peers.remove(p)) return;
+    _emitPeers();
+    diag('disconnected: ${p.info.name} code=${p.ws.closeCode} reason=${p.ws.closeReason}');
+  }
+
+  void _emitPeers() {
+    b._devices.add(_peers.map((p) => p.info).toList());
+    b._status.add(_peers.isEmpty ? BridgeStatus.searching : BridgeStatus.connected);
+  }
+
+  void send(String type, Map<String, dynamic> payload, String id, {String? deviceId}) {
+    for (final p in _peers) {
+      if (deviceId == null || p.info.id == deviceId) _sendTo(p, type, payload, id);
     }
   }
 
-  void sendRaw(Map<String, dynamic> payload, String type) =>
-      send(BridgeMessage(type: type, payload: payload, id: _uuid.v4()));
-
-  void _onDisconnected() {
-    _log.w('Disconnected from Mac');
-    _statusStream.add(BridgeStatus.disconnected);
-    _heartbeatTimer?.cancel();
-    _scheduleReconnect();
-  }
-
-  void _startHeartbeat() {
-    _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(AL.heartbeat, (_) {
-      sendRaw({}, AL.typePing);
+  void _sendTo(_Peer p, String type, Map<String, dynamic> payload, String id) {
+    p.outbound(() async {
+      final frame = await LinkCrypto.seal(
+          p.key, jsonEncode({'type': type, 'payload': payload, 'id': id, 's': p.phoneSid}));
+      p.ws.add(frame);
     });
   }
 
-  void disconnect() {
-    _heartbeatTimer?.cancel();
-    _reconnectTimer?.cancel();
-    _broadcastTimer?.cancel();
-    _udpBroadcastSocket?.close();
-    _udpListenSocket?.close();
-    _channel?.sink.close();
-    _channel = null;
-    for (final ws in List.of(_clients)) {
-      try { ws.close(); } catch (_) {}
+  // ── discovery beacon ──
+
+  /// One UDP socket per LAN address: binding to the interface IP makes the
+  /// broadcast leave through Wi-Fi/Ethernet even when a VPN owns the default
+  /// route (with 0.0.0.0 macOS routes 255.255.255.255 into the tunnel).
+  final Map<String, RawDatagramSocket> _udpByIp = {};
+
+  Future<void> _startBeacon() async {
+    _beaconTimer = Timer.periodic(const Duration(seconds: 2), (_) => _beacon());
+  }
+
+  Future<void> _beacon() async {
+    for (final ip in _udpByIp.keys.where((ip) => !_ips.contains(ip)).toList()) {
+      _udpByIp.remove(ip)?.close();
     }
-    _clients.clear();
-    _statusStream.add(BridgeStatus.disconnected);
+    final data = utf8.encode('$_beaconTag|$_macId|$_port');
+    for (final ip in _ips) {
+      var sock = _udpByIp[ip];
+      if (sock == null) {
+        try {
+          sock = await RawDatagramSocket.bind(InternetAddress(ip), 0);
+          sock.broadcastEnabled = true;
+          _udpByIp[ip] = sock;
+          diag('beacon socket bound to $ip');
+        } catch (e) {
+          if (_beaconFails++ % 30 == 0) diag('beacon bind $ip failed: $e');
+          continue;
+        }
+      }
+      final subnet = ip.split('.').length == 4 ? '${ip.substring(0, ip.lastIndexOf('.'))}.255' : null;
+      for (final t in {'255.255.255.255', if (subnet != null) subnet}) {
+        try {
+          final n = sock.send(data, InternetAddress(t), AL.udpPort);
+          if (n == 0 && _beaconFails++ % 30 == 0) {
+            diag('beacon $ip → $t blocked (0 bytes) — проверь «Локальная сеть» в настройках macOS');
+          }
+        } catch (e) {
+          if (_beaconFails++ % 30 == 0) diag('beacon $ip → $t failed: $e');
+        }
+      }
+    }
+  }
+}
+
+// ═════════════════════════════ ANDROID ═════════════════════════════════
+
+class _PhoneLink {
+  _PhoneLink(this.b);
+  final BridgeService b;
+
+  static const _methods = MethodChannel('com.androidlink/methods');
+  static const _events = EventChannel('com.androidlink/link');
+
+  Future<void> start() async {
+    _events.receiveBroadcastStream().listen((e) {
+      final m = (e as Map).cast<String, dynamic>();
+      switch (m['kind']) {
+        case 'status':
+          _applyStatus(m['data'] as String);
+        case 'message':
+          try {
+            b._messages.add(BridgeMessage.fromJson(m['data'] as String));
+          } catch (_) {}
+        case 'diag':
+          b._diag.add(m['data'] as String? ?? '');
+        case 'transfer':
+          try {
+            b._nativeTransfers.add(jsonDecode(m['data'] as String) as Map<String, dynamic>);
+          } catch (_) {}
+      }
+    });
+    await _refreshState();
+  }
+
+  Future<void> _refreshState() async {
+    try {
+      final s = (await _methods.invokeMethod<Map>('state'))?.cast<String, dynamic>();
+      if (s == null) return;
+      b._peerName.add(s['macName'] as String?);
+      b._diag.add(s['diag'] as String? ?? '');
+      _applyStatus(s['status'] as String? ?? 'unpaired');
+    } catch (_) {}
+  }
+
+  void _applyStatus(String s) {
+    b._issue.add(s == 'unpaired' || s == 'unauthorized' ? s : null);
+    b._status.add(switch (s) {
+      'connected' => BridgeStatus.connected,
+      'connecting' => BridgeStatus.connecting,
+      'searching' => BridgeStatus.searching,
+      _ => BridgeStatus.disconnected,
+    });
+    if (s == 'connected') {
+      _methods.invokeMethod<Map>('state').then((st) {
+        b._peerName.add(st?['macName'] as String?);
+      }).catchError((Object _) {});
+    }
+  }
+
+  void send(String type, Map<String, dynamic> payload) {
+    _methods.invokeMethod('send', {'type': type, 'payload': jsonEncode(payload)})
+        .catchError((Object _) {});
+  }
+
+  Future<bool> pair(String qr) async {
+    final ok = await _methods.invokeMethod<bool>('pair', {'qr': qr}) ?? false;
+    await _refreshState();
+    return ok;
+  }
+
+  Future<bool> connectIp(String ip) async =>
+      await _methods.invokeMethod<bool>('connectIp', {'ip': ip}) ?? false;
+
+  Future<Map<String, dynamic>> diagnostics() async =>
+      (await _methods.invokeMethod<Map>('state'))?.cast<String, dynamic>() ?? const {};
+
+  Future<void> sendFiles(List<String> paths) async {
+    await _methods.invokeMethod('sendFiles', {'paths': paths});
+  }
+
+  Future<void> unpair() async {
+    await _methods.invokeMethod('unpair');
+    await _refreshState();
   }
 }
