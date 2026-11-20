@@ -15,9 +15,6 @@ dependencies:
   web_socket_channel: ^3.0.1
   # ── macOS UI ──────────────────────────────────────────────────────
   macos_ui: ^2.2.2
-  window_manager: ^0.5.1
-  local_notifier: ^0.1.6
-
   # ── State ─────────────────────────────────────────────────────────
   # ── Android: SMS и звонки ─────────────────────────────────────────
   permission_handler: ^13.0.2
@@ -36,6 +33,13 @@ dependencies:
   # ── QR-код ────────────────────────────────────────────────────────────
   qr_flutter: ^4.1.0
   mobile_scanner: ^7.5.0
+  flutter_local_notifications: ^23.0.3
+  desktop_drop: ^0.8.0
+  cryptography_flutter: ^2.3.4
+  intl: ^0.20.3
+  macos_window_utils: ^1.9.1
+  flutter_localizations:
+    sdk: flutter
 
 dev_dependencies:
   flutter_test:

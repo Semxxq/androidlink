@@ -1,7 +1,8 @@
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show Color;
 
-import '../bridge/services/bridge_service.dart';
-import '../../core/constants/app_constants.dart';
+import '../features/bridge/services/bridge_service.dart';
+import '../core/constants/app_constants.dart';
 
 /// Android-only helpers for the UI. SMS / calls / notifications are
 /// forwarded natively by LinkService, even with the app closed.
@@ -22,6 +23,16 @@ class AndroidBridgeService {
   Future<void> openNotificationSettings() => _call('openNotificationSettings');
   Future<void> openAppSettings() => _call('openAppSettings');
   Future<void> requestBatteryExemption() => _call('requestBatteryExemption');
+
+  /// Wallpaper accent colour on Android 12+, null otherwise.
+  Future<Color?> systemAccent() async {
+    try {
+      final v = await _methods.invokeMethod<int>('systemAccent');
+      return v == null ? null : Color(v);
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<bool> isNotificationListenerEnabled() => _bool('isNotificationListenerEnabled');
   Future<bool> isBatteryExempt() => _bool('isBatteryExempt');

@@ -21,5 +21,8 @@
 - Android: связь в нативном `LinkService.kt` (foreground connectedDevice, OkHttp, автореконнект+маяк+NetworkCallback, очередь 300, батарея). SMS/звонки/уведомления — manifest-ресиверы → LinkService.post. Flutter ↔ через `com.androidlink/methods` + EventChannel `com.androidlink/link`. SMS reply чинён (+sms_status ack).
 - Mac: `bridge_service.dart` — _MacHost (pairing.json в AppSupport, мульти-девайс, PeerInfo), _PhoneLink (Android-прокси).
 - Платформы перегенерены Flutter 3.50.1 (gradle .kts, macos проект, target 12.0). CI: analyze+test+apk+macos на любой push.
-- Локально: flutter есть, НЕТ Android SDK и Xcode → сборка только в CI. analyze: 0 errors, test ok.
-- Осталось: коммит/пуш (ждёт ок), проверка CI, затем Ф2.
+- Ветка `phase1-core-link` запушена. Локально всё есть: Flutter 3.50.1, Android SDK (/opt/homebrew/share/android-commandlinetools, compileSdk 37), Xcode, CocoaPods. APK и macOS .app собираются локально.
+- Пины: equatable ^2.0.7 (macos_ui 2.2.2), window_manager ^0.5.1 (0.7 ломает Linux-тесты), Podfile target 12.0.
+- Дизайн (выбор юзера): Mac — нативный macOS (как Messages: сайдбар с телефоном+батареей, системные шрифты, светлая/тёмная авто, menubar). Android — Material You (dynamic color, M3).
+- Mac-приложение установлено в /Applications/AndroidLink.app. Телефон по adb не подключён.
+- Осталось: зелёный CI → тест на телефоне → Ф2 (+редизайн).

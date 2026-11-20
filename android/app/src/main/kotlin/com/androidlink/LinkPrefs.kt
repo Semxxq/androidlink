@@ -31,6 +31,10 @@ class LinkPrefs(ctx: Context) {
         sp.edit().putString("hosts", list.joinToString(",")).putInt("port", port).apply()
     }
 
+    var smsLastId: Long
+        get() = sp.getLong("sms_last_id", 0L)
+        set(v) = sp.edit().putLong("sms_last_id", v).apply()
+
     fun setMacName(name: String) = sp.edit().putString("mac_name", name).apply()
     fun clearPairId() = sp.edit().remove("pair_id").apply()
 

@@ -22,6 +22,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onResume() {
         super.onResume()
+        PhoneControl.stopRing(this) // "find my phone" stops once you have it
         LinkService.start(this)
     }
 
@@ -76,6 +77,18 @@ class MainActivity : FlutterActivity() {
                     if (type.isNotEmpty()) LinkService.post(this, type, payload)
                     result.success(null)
                 }
+                "sendFiles" -> {
+                    val svc = LinkService.instance
+                    val paths = call.argument<List<String>>("paths") ?: emptyList()
+                    if (svc == null || LinkService.status != "connected") result.success(false)
+                    else {
+                        paths.forEach { svc.files.send(Uri.fromFile(java.io.File(it))) }
+                        result.success(true)
+                    }
+                }
+                "systemAccent" -> result.success(
+                    if (Build.VERSION.SDK_INT >= 31) getColor(android.R.color.system_accent1_500) else null
+                )
                 "isBatteryExempt" -> result.success(isBatteryExempt())
                 "requestBatteryExemption" -> {
                     requestBatteryExemption()

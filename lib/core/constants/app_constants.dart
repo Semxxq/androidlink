@@ -1,39 +1,42 @@
+/// Protocol constants shared by the Mac and Android sides.
+/// Native counterpart: android/app/src/main/kotlin/com/androidlink/LinkService.kt
 class AL {
   AL._();
 
-  // ── Bridge (локальная сеть) ───────────────────────────────────────────
-  static const int    wsPort          = 41234;
-  static const int    udpPort         = 41235;
-  static const Duration wsTimeout     = Duration(seconds: 10);
-  static const Duration heartbeat     = Duration(seconds: 5);
+  static const int wsPort = 41234;
+  static const int udpPort = 41235;
 
-  // ── Firestore collections ─────────────────────────────────────────────
-  static const String colUsers        = 'al_users';
-  static const String colMessages     = 'messages';
-  static const String colCalls        = 'calls';
-  static const String colNotifications= 'notifications';
-  static const String colClipboard    = 'clipboard';
+  // phone → Mac
+  static const String typeSms = 'sms';
+  static const String typeSmsBatch = 'sms_batch';
+  static const String typeSmsStatus = 'sms_status';
+  static const String typeCall = 'call';
+  static const String typeCallBatch = 'call_batch';
+  static const String typeContactsBatch = 'contacts_batch';
+  static const String typeNotif = 'notification';
+  static const String typeNotifRemoved = 'notification_removed';
+  static const String typeDeviceInfo = 'device_info';
+  static const String typeBattery = 'battery';
+  static const String typeCallResult = 'call_action_result';
+  static const String typeNotifReplyResult = 'notification_reply_result';
 
-  // ── WebSocket message types ───────────────────────────────────────────
-  static const String typeSms         = 'sms';
-  static const String typeSmsReply    = 'sms_reply';
-  static const String typeCall        = 'call';
-  static const String typeNotif       = 'notification';
-  static const String typeClipboard   = 'clipboard';
-  static const String typeFile        = 'file';
-  static const String typeFileChunk   = 'file_chunk';
-  static const String typePing        = 'ping';
-  static const String typePong        = 'pong';
-  static const String typePaired      = 'paired';
-  static const String typeContactList = 'contacts';
+  // Mac → phone
+  static const String typeSmsReply = 'sms_reply';
+  static const String typeSmsSync = 'sms_sync';
+  static const String typeCallsSync = 'calls_sync';
+  static const String typeContactsSync = 'contacts_sync';
+  static const String typeCallAction = 'call_action';
+  static const String typeCallDial = 'call_dial';
+  static const String typeRing = 'ring';
+  static const String typeRingStop = 'ring_stop';
+  static const String typeNotifDismiss = 'notification_dismiss';
+  static const String typeNotifReply = 'notification_reply';
 
-  // ── Безопасность ─────────────────────────────────────────────────────
-  static const String keyPairKey      = 'al_keypair';
-  static const String deviceIdKey     = 'al_device_id';
-  static const String pairingKey      = 'al_pairing';
-
-  // ── UI ────────────────────────────────────────────────────────────────
-  static const double sidebarWidth    = 260.0;
-  static const double minWindowWidth  = 900.0;
-  static const double minWindowHeight = 600.0;
+  // both ways
+  static const String typeClipboard = 'clipboard';
+  static const String typeFileOffer = 'file_offer';
+  static const String typeFileChunk = 'file_chunk';
+  static const String typeFileAck = 'file_ack';
+  static const String typeFileDone = 'file_done';
+  static const String typeFileCancel = 'file_cancel';
 }

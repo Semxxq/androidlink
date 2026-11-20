@@ -71,6 +71,7 @@ class BridgeService {
   final _qr = BehaviorSubject<String?>.seeded(null);
   final _issue = BehaviorSubject<String?>.seeded(null);
   final _peerName = BehaviorSubject<String?>.seeded(null);
+  final _nativeTransfers = StreamController<Map<String, dynamic>>.broadcast();
 
   Stream<BridgeStatus> get status => _status.stream;
   Stream<BridgeMessage> get messages => _messages.stream;
@@ -90,6 +91,9 @@ class BridgeService {
 
   /// Android: name of the paired Mac.
   Stream<String?> get peerName => _peerName.stream;
+
+  /// Android: file transfer progress reported by the native service.
+  Stream<Map<String, dynamic>> get nativeTransfers => _nativeTransfers.stream;
 
   _MacHost? _mac;
   _PhoneLink? _phone;
@@ -120,6 +124,7 @@ class BridgeService {
   Future<bool> connectViaQr(String qr) async => await _phone?.pair(qr) ?? false;
   Future<bool> connectToMacDirectly(String ip) async => await _phone?.connectIp(ip) ?? false;
   Future<void> unpair() async => _phone?.unpair();
+  Future<void> sendFiles(List<String> paths) async => _phone?.sendFiles(paths);
 
   // ── Mac ──
   List<PeerInfo> get pairedDevices => _mac?.paired ?? const [];
@@ -491,6 +496,10 @@ class _PhoneLink {
           try {
             b._messages.add(BridgeMessage.fromJson(m['data'] as String));
           } catch (_) {}
+        case 'transfer':
+          try {
+            b._nativeTransfers.add(jsonDecode(m['data'] as String) as Map<String, dynamic>);
+          } catch (_) {}
       }
     });
     await _refreshState();
@@ -533,6 +542,10 @@ class _PhoneLink {
 
   Future<bool> connectIp(String ip) async =>
       await _methods.invokeMethod<bool>('connectIp', {'ip': ip}) ?? false;
+
+  Future<void> sendFiles(List<String> paths) async {
+    await _methods.invokeMethod('sendFiles', {'paths': paths});
+  }
 
   Future<void> unpair() async {
     await _methods.invokeMethod('unpair');

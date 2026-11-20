@@ -30,6 +30,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.net.DatagramPacket
+import java.util.concurrent.Executors
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.util.UUID
@@ -89,6 +90,10 @@ class LinkService : Service() {
     }
 
     private lateinit var prefs: LinkPrefs
+    lateinit var files: FileTransfer
+        private set
+    private var smsObserver: PhoneData.SmsObserver? = null
+    private val io = Executors.newSingleThreadExecutor()
     private lateinit var thread: HandlerThread
     private lateinit var handler: Handler
     private val main = Handler(Looper.getMainLooper())
@@ -126,6 +131,7 @@ class LinkService : Service() {
         prefs = LinkPrefs(this)
         thread = HandlerThread("al-link").also { it.start() }
         handler = Handler(thread.looper)
+        files = FileTransfer(this)
         startAsForeground()
         instance = this
         synchronized(pending) {
@@ -133,6 +139,10 @@ class LinkService : Service() {
         }
         registerNetworkCallback()
         registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        smsObserver = PhoneData.SmsObserver(this, handler, prefs) { send("sms", it) }.also {
+            it.register()
+            handler.post { it.onChange(false, null) } // catch up on SMS received while we were dead
+        }
         handler.post { connectNext() }
     }
 
@@ -150,6 +160,9 @@ class LinkService : Service() {
     override fun onDestroy() {
         instance = null
         try { unregisterReceiver(batteryReceiver) } catch (_: Exception) {}
+        try { smsObserver?.unregister() } catch (_: Exception) {}
+        files.shutdown()
+        io.shutdownNow()
         netCallback?.let {
             try { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it) } catch (_: Exception) {}
         }
@@ -184,11 +197,19 @@ class LinkService : Service() {
         )
         @Suppress("DEPRECATION")
         val b = if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CHANNEL_ID) else Notification.Builder(this)
+        val clip = PendingIntent.getActivity(
+            this, 2,
+            Intent(this, ShareActivity::class.java).setAction(ShareActivity.ACTION_PUSH_CLIPBOARD)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        @Suppress("DEPRECATION")
         return b.setSmallIcon(android.R.drawable.stat_notify_sync)
             .setContentTitle("AndroidLink")
             .setContentText(text)
             .setContentIntent(pi)
             .setOngoing(true)
+            .addAction(Notification.Action.Builder(null, "Буфер → Mac", clip).build())
             .build()
     }
 
@@ -204,10 +225,10 @@ class LinkService : Service() {
         try {
             (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(NOTIF_ID, buildNotification(text))
         } catch (_: Exception) {}
-        emit("status", s)
+        emitUi("status", s)
     }
 
-    private fun emit(kind: String, data: Any) {
+    fun emitUi(kind: String, data: Any) {
         if (listeners.isEmpty()) return
         main.post { listeners.forEach { it(kind, data) } }
     }
@@ -290,7 +311,7 @@ class LinkService : Service() {
             return
         }
         handleCommand(type, payload, env.optString("id"))
-        emit("message", env.toString())
+        if (!type.startsWith("file_")) emitUi("message", env.toString())
     }
 
     private fun onDrop(sock: WebSocket, code: Int) {
@@ -311,7 +332,8 @@ class LinkService : Service() {
 
     fun send(type: String, payload: JSONObject) = handler.post {
         if (authed && ws != null) sendNow(type, payload)
-        else if (type != "battery") { // battery goes in device_info on connect
+        // battery goes in device_info on connect; file chunks are never buffered
+        else if (type != "battery" && !type.startsWith("file_")) {
             queue.addLast(type to payload)
             while (queue.size > MAX_QUEUE) queue.removeFirst()
         }
@@ -330,7 +352,27 @@ class LinkService : Service() {
     // ── commands from the Mac ────────────────────────────────────────────
 
     private fun handleCommand(type: String, p: JSONObject, msgId: String) {
+        if (files.onMessage(type, p)) return
+        val reply: (String, JSONObject) -> Unit = { t, o -> send(t, o) }
         when (type) {
+            "sms_sync" -> io.execute { PhoneData.syncSms(this, p.optInt("limit", 1500).coerceIn(1, 5000), reply) }
+            "calls_sync" -> io.execute { PhoneData.syncCalls(this, p.optInt("limit", 300).coerceIn(1, 2000), reply) }
+            "contacts_sync" -> io.execute { PhoneData.syncContacts(this, reply) }
+            "call_action" -> {
+                val ok = PhoneControl.callAction(this, p.optString("action"))
+                sendNow("call_action_result", JSONObject().put("action", p.optString("action")).put("ok", ok))
+            }
+            "call_dial" -> {
+                val ok = PhoneControl.dial(this, p.optString("number"))
+                sendNow("call_action_result", JSONObject().put("action", "dial").put("ok", ok))
+            }
+            "ring" -> PhoneControl.ring(this, p.optInt("seconds", 30))
+            "ring_stop" -> PhoneControl.stopRing(this)
+            "notification_dismiss" -> AndroidLinkNotificationService.dismiss(p.optString("key"))
+            "notification_reply" -> {
+                val ok = AndroidLinkNotificationService.reply(p.optString("key"), p.optString("text"))
+                sendNow("notification_reply_result", JSONObject().put("key", p.optString("key")).put("ok", ok))
+            }
             "sms_reply" -> {
                 val to = p.optString("address").ifEmpty { p.optString("to") }
                 val body = p.optString("body")
