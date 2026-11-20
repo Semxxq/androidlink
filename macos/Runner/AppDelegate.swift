@@ -22,13 +22,14 @@ class AppDelegate: FlutterAppDelegate {
 /// Menu bar item: connection + battery at a glance, quick actions.
 /// Dart → Swift: "update" {connected, title, subtitle}
 /// Swift → Dart: "action" {id: ring | clipboard | sendFile}
-final class StatusBarController: NSObject {
+final class StatusBarController: NSObject, NSMenuDelegate {
   static let shared = StatusBarController()
 
   private var item: NSStatusItem?
   private var channel: FlutterMethodChannel?
   private weak var window: NSWindow?
   private let card = PhoneCardModel()
+  private var cardHost: NSHostingView<PhoneCardView>?
   private var actionItems: [NSMenuItem] = []
 
   func attach(messenger: FlutterBinaryMessenger, window: NSWindow) {
@@ -71,6 +72,8 @@ final class StatusBarController: NSObject {
     let host = NSHostingView(rootView: PhoneCardView(m: card))
     host.frame = NSRect(x: 0, y: 0, width: 300, height: 132)
     cardItem.view = host
+    cardHost = host
+    menu.delegate = self
     menu.addItem(cardItem)
     menu.addItem(.separator())
     actionItems = [
@@ -99,6 +102,7 @@ final class StatusBarController: NSObject {
 
   private func update(_ a: [String: Any]) {
     let connected = a["connected"] as? Bool ?? false
+    try? "\(Date()) \(a)\n".write(toFile: NSHomeDirectory() + "/Library/Application Support/com.androidlink.app/card.log", atomically: true, encoding: .utf8)
     item?.button?.image = NSImage(
       systemSymbolName: connected ? "iphone" : "iphone.slash", accessibilityDescription: "AndroidLink")
     card.connected = connected
@@ -110,7 +114,16 @@ final class StatusBarController: NSObject {
     card.missed = a["missed"] as? Int ?? 0
     card.syncing = a["syncing"] as? Bool ?? false
     actionItems.forEach { $0.isEnabled = connected }
+    refreshCard()
   }
+
+  private func refreshCard() {
+    // SwiftUI inside an NSMenu does not reliably observe changes; push a fresh snapshot.
+    cardHost?.rootView = PhoneCardView(m: card.snapshot())
+    cardHost?.needsDisplay = true
+  }
+
+  func menuWillOpen(_ menu: NSMenu) { refreshCard() }
 
 
   @objc private func onAction(_ sender: NSMenuItem) {
@@ -138,6 +151,13 @@ final class PhoneCardModel: ObservableObject {
   @Published var notifs = 0
   @Published var missed = 0
   @Published var syncing = false
+
+  func snapshot() -> PhoneCardModel {
+    let c = PhoneCardModel()
+    c.connected = connected; c.name = name; c.battery = battery; c.charging = charging
+    c.unread = unread; c.notifs = notifs; c.missed = missed; c.syncing = syncing
+    return c
+  }
 }
 
 struct PhoneCardView: View {
