@@ -205,35 +205,68 @@ class _TransferRow extends StatelessWidget {
         : t.finished
             ? (t.incoming ? 'Получено · ${bytes(t.size > 0 ? t.size : t.done)}' : 'Отправлено · ${bytes(t.size)}')
             : '${bytes(t.done)} из ${bytes(t.size)}';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Row(children: [
-        MacosIcon(t.incoming ? CupertinoIcons.arrow_down_circle : CupertinoIcons.arrow_up_circle,
-            size: 22, color: t.failed ? Pal.red : (t.finished ? Pal.green : Pal.blue)),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(t.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: txt(context)),
-            const SizedBox(height: 4),
-            if (!t.finished && !t.failed) ProgressBar(value: t.progress * 100),
-            if (!t.finished && !t.failed) const SizedBox(height: 4),
-            Text(status, style: txt(context, size: 11, color: t.failed ? Pal.red : p.secondary)),
-          ]),
-        ),
-        const SizedBox(width: 8),
-        if (t.finished && t.path != null)
-          PushButton(
-            controlSize: ControlSize.small,
-            secondary: true,
-            onPressed: () => MacStore.instance.revealInFinder(t.path!),
-            child: const Text('Показать'),
-          )
-        else if (!t.finished && !t.failed)
-          MacosIconButton(
-            icon: MacosIcon(CupertinoIcons.xmark_circle_fill, size: 16, color: p.secondary),
-            onPressed: () => FileTransferHub.instance.cancel(t.fid),
+    final canOpen = t.finished && t.path != null;
+    final ext = t.name.split('.').last.toLowerCase();
+    final isImage = const {'jpg', 'jpeg', 'png', 'gif', 'heic', 'webp', 'bmp'}.contains(ext);
+    final s = MacStore.instance;
+    Widget leading = MacosIcon(t.incoming ? CupertinoIcons.arrow_down_circle : CupertinoIcons.arrow_up_circle,
+        size: 22, color: t.failed ? Pal.red : (t.finished ? Pal.green : Pal.blue));
+    if (canOpen && isImage && File(t.path!).existsSync()) {
+      leading = ClipRRect(
+        borderRadius: BorderRadius.circular(5),
+        child: Image.file(File(t.path!), width: 36, height: 36, fit: BoxFit.cover, cacheWidth: 96),
+      );
+    } else if (canOpen) {
+      leading = MacosIcon(_iconFor(ext), size: 24, color: Pal.blue);
+    }
+    return HoverTile(
+      radius: 0,
+      onTap: canOpen ? () => s.openFile(t.path!) : null,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        child: Row(children: [
+          SizedBox(width: 36, child: Center(child: leading)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(t.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: txt(context, w: FontWeight.w500)),
+              const SizedBox(height: 4),
+              if (!t.finished && !t.failed) ProgressBar(value: t.progress * 100),
+              if (!t.finished && !t.failed) const SizedBox(height: 4),
+              Text('$status · ${shortTime(t.started)}', style: txt(context, size: 11, color: t.failed ? Pal.red : p.secondary)),
+            ]),
           ),
-      ]),
+          const SizedBox(width: 8),
+          if (canOpen) ...[
+            PushButton(
+              controlSize: ControlSize.small,
+              onPressed: () => s.openFile(t.path!),
+              child: const Text('Открыть'),
+            ),
+            const SizedBox(width: 6),
+            MacosTooltip(
+              message: 'Показать в Finder',
+              child: MacosIconButton(
+                icon: MacosIcon(CupertinoIcons.folder, size: 16, color: p.secondary),
+                onPressed: () => s.revealInFinder(t.path!),
+              ),
+            ),
+          ] else if (!t.finished && !t.failed)
+            MacosIconButton(
+              icon: MacosIcon(CupertinoIcons.xmark_circle_fill, size: 16, color: p.secondary),
+              onPressed: () => FileTransferHub.instance.cancel(t.fid),
+            ),
+        ]),
+      ),
     );
   }
 }
+
+IconData _iconFor(String ext) => switch (ext) {
+      'pdf' || 'doc' || 'docx' || 'txt' || 'rtf' || 'pages' => CupertinoIcons.doc_text_fill,
+      'mp4' || 'mov' || 'mkv' || 'avi' || 'webm' => CupertinoIcons.film_fill,
+      'mp3' || 'm4a' || 'wav' || 'ogg' || 'flac' || 'opus' => CupertinoIcons.music_note_2,
+      'zip' || 'rar' || '7z' || 'tar' || 'gz' => CupertinoIcons.archivebox_fill,
+      'apk' => CupertinoIcons.device_phone_portrait,
+      _ => CupertinoIcons.doc_fill,
+    };

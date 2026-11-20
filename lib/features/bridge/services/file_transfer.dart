@@ -29,7 +29,23 @@ class Transfer {
   bool finished = false;
   bool failed = false;
   String? path;
-  final DateTime started = DateTime.now();
+  DateTime started = DateTime.now();
+
+  Map<String, dynamic> toJson() => {
+        'fid': fid, 'name': name, 'size': size, 'in': incoming, 'path': path,
+        'ts': started.millisecondsSinceEpoch,
+      };
+
+  static Transfer fromJson(Map<String, dynamic> j) => Transfer(
+        fid: j['fid'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        size: (j['size'] as num?)?.toInt() ?? 0,
+        incoming: j['in'] as bool? ?? true,
+      )
+        ..path = j['path'] as String?
+        ..finished = true
+        ..done = (j['size'] as num?)?.toInt() ?? 0
+        ..started = DateTime.fromMillisecondsSinceEpoch((j['ts'] as num?)?.toInt() ?? 0);
 
   double get progress => size > 0 ? (done / size).clamp(0, 1).toDouble() : (finished ? 1 : 0);
 }
@@ -67,7 +83,29 @@ class FileTransferHub {
 
   Future<void> _chain = Future.value();
 
+  Future<File> _historyFile() async =>
+      File('${(await getApplicationSupportDirectory()).path}/transfers.json');
+
+  Future<void> _loadHistory() async {
+    try {
+      final f = await _historyFile();
+      if (!await f.exists()) return;
+      final list = (jsonDecode(await f.readAsString()) as List).map((e) => Transfer.fromJson((e as Map).cast()));
+      _all.insertAll(0, list);
+      _emit();
+    } catch (_) {}
+  }
+
+  Future<void> _saveHistory() async {
+    try {
+      final done = _all.where((t) => t.finished && !t.failed).toList();
+      final keep = done.length > 200 ? done.sublist(done.length - 200) : done;
+      await (await _historyFile()).writeAsString(jsonEncode(keep.map((t) => t.toJson()).toList()));
+    } catch (_) {}
+  }
+
   void start() {
+    if (_sub == null) _loadHistory();
     // Handlers await file I/O — chain them so chunks are processed in order.
     _sub ??= BridgeService.instance.messages.listen((m) {
       if (!m.type.startsWith('file_')) return;
@@ -75,7 +113,14 @@ class FileTransferHub {
     });
   }
 
-  void _emit() => _list.add(List.unmodifiable(_all.reversed));
+  bool _lastDone = false;
+  void _emit() {
+    _list.add(List.unmodifiable(_all.reversed));
+    // Persist whenever the set of finished transfers may have changed.
+    final anyActive = _all.any((t) => !t.finished && !t.failed);
+    if (!anyActive || _lastDone != anyActive) _saveHistory();
+    _lastDone = anyActive;
+  }
 
   void clearFinished() {
     _all.removeWhere((t) => t.finished || t.failed);
@@ -100,7 +145,7 @@ class FileTransferHub {
     final fid = LinkCrypto.randomId();
     final size = await f.length();
     final name = f.uri.pathSegments.last;
-    final t = Transfer(fid: fid, name: name, size: size, incoming: false, deviceId: deviceId);
+    final t = Transfer(fid: fid, name: name, size: size, incoming: false, deviceId: deviceId)..path = f.path;
     _all.add(t);
     _emit();
     final b = BridgeService.instance;

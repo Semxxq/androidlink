@@ -564,9 +564,17 @@ class MacStore extends ChangeNotifier {
     }
   }
 
+  // Sandbox blocks spawning `open`; NSWorkspace via the native channel works.
   Future<void> revealInFinder(String path) async {
     try {
-      await Process.run('open', ['-R', path]);
+      await _native.invokeMethod('reveal', path);
+    } catch (_) {}
+  }
+
+  Future<void> openFile(String path) async {
+    try {
+      final ok = await _native.invokeMethod<bool>('openFile', path) ?? false;
+      if (!ok) _toast('Файл не найден — возможно, его переместили');
     } catch (_) {}
   }
 

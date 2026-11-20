@@ -37,6 +37,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
       guard let self else { return }
       let pb = NSPasteboard.general
       switch call.method {
+      case "openFile":
+        let path = call.arguments as? String ?? ""
+        guard FileManager.default.fileExists(atPath: path) else { result(false); return }
+        result(NSWorkspace.shared.open(URL(fileURLWithPath: path))); return
+      case "reveal":
+        let path = call.arguments as? String ?? ""
+        if FileManager.default.fileExists(atPath: path) {
+          NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        } else if let dl = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
+          NSWorkspace.shared.open(dl)
+        }
+        result(nil); return
       case "clipCount":
         result(pb.changeCount); return
       case "clipImage":
