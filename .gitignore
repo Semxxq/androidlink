@@ -1,0 +1,14 @@
+.DS_Store
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.idea/
+*.iml
+android/.gradle/
+android/local.properties
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+macos/Flutter/ephemeral/
+macos/Pods/
+ios/Flutter/ephemeral/

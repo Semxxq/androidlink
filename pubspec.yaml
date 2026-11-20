@@ -39,6 +39,8 @@ dependencies:
   path_provider: ^2.1.4
   file_picker: ^8.1.2
   rxdart: ^0.28.0
+  equatable: ^2.0.5
+  cryptography: ^2.7.0
   flutter_secure_storage: ^9.2.2
 
   # ── QR-код ────────────────────────────────────────────────────────────
@@ -52,6 +54,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/images/
-    - assets/icons/

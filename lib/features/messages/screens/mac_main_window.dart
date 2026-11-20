@@ -113,9 +113,10 @@ class _WaitingScreen extends StatelessWidget {
 
           // QR-код
           StreamBuilder<String?>(
-            stream: Stream.value(BridgeService.instance.qrData),
+            stream: BridgeService.instance.qrStream,
+            initialData: BridgeService.instance.qrData,
             builder: (_, snap) {
-              final qr = BridgeService.instance.qrData;
+              final qr = snap.data;
               if (qr == null) {
                 return const Text(
                   'Подключись к WiFi для отображения QR',

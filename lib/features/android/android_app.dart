@@ -34,6 +34,7 @@ class _AndroidMainScreenState extends State<AndroidMainScreen> {
   bool _callsGranted   = false;
   bool _notifGranted   = false;
   bool _notifListener  = false;
+  bool _batteryExempt  = false;
   final _ipCtrl = TextEditingController();
 
   @override
@@ -47,7 +48,10 @@ class _AndroidMainScreenState extends State<AndroidMainScreen> {
     final phone  = await Permission.phone.isGranted;
     final notif  = await Permission.notification.isGranted;
     final listen = await AndroidBridgeService.instance.isNotificationListenerEnabled();
+    final battery = await AndroidBridgeService.instance.isBatteryExempt();
+    if (!mounted) return;
     setState(() {
+      _batteryExempt = battery;
       _smsGranted    = sms;
       _callsGranted  = phone;
       _notifGranted  = notif;
@@ -62,6 +66,7 @@ class _AndroidMainScreenState extends State<AndroidMainScreen> {
       Permission.notification,
       Permission.contacts,
     ].request();
+    await AndroidBridgeService.instance.requestBatteryExemption();
     await _checkPermissions();
   }
 
@@ -115,6 +120,7 @@ class _AndroidMainScreenState extends State<AndroidMainScreen> {
                 callsGranted:  _callsGranted,
                 notifGranted:  _notifGranted,
                 notifListener: _notifListener,
+                batteryExempt: _batteryExempt,
                 onRequest:     _requestAll,
                 onOpenNotifSettings: () async {
                   await AndroidBridgeService.instance.openNotificationSettings();
@@ -141,7 +147,12 @@ class _AndroidMainScreenState extends State<AndroidMainScreen> {
                 onConnect: () {
                   final ip = _ipCtrl.text.trim();
                   if (ip.isEmpty) return;
-                  BridgeService.instance.connectToMacDirectly(ip);
+                  BridgeService.instance.connectToMacDirectly(ip).then((ok) {
+                    if (!ok && mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('Сначала отсканируй QR-код на Маке')));
+                    }
+                  });
                 },
               ),
 
@@ -166,14 +177,31 @@ class _ConnectionCard extends StatelessWidget {
       initialData: BridgeService.instance.currentStatus,
       builder:     (_, snap) {
         final status = snap.data!;
+        return StreamBuilder<String?>(
+          stream: BridgeService.instance.pairingIssue,
+          builder: (_, issueSnap) => StreamBuilder<String?>(
+            stream: BridgeService.instance.peerName,
+            builder: (_, nameSnap) =>
+                _build(context, status, issueSnap.data, nameSnap.data),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _build(BuildContext context, BridgeStatus status, String? issue, String? macName) {
         final isConnected = status == BridgeStatus.connected;
+        final mac = macName ?? 'Mac';
         final (label, sub, color) = switch (status) {
-          BridgeStatus.connected    => ('Подключено к Mac ✓',
-              'SMS и звонки синхронизируются', AppTheme.accentGreen),
-          BridgeStatus.connecting   => ('Подключение...', 'Устанавливаем соединение', AppTheme.accentOrange),
-          BridgeStatus.searching    => ('Поиск Mac...', 'Убедись что на одном WiFi', AppTheme.accent),
-          BridgeStatus.disconnected => ('Не подключено', 'Открой AndroidLink на Mac', AppTheme.textSecondary),
+          BridgeStatus.connected    => ('Подключено к $mac ✓',
+              'Работает в фоне, даже если закрыть приложение', AppTheme.accentGreen),
+          BridgeStatus.connecting   => ('Подключение...', 'Устанавливаем защищённое соединение', AppTheme.accentOrange),
+          BridgeStatus.searching    => ('Поиск $mac...', 'Mac и телефон должны быть в одной сети', AppTheme.accent),
+          BridgeStatus.disconnected => issue == 'unauthorized'
+              ? ('Mac не узнал телефон', 'Отсканируй QR-код заново', AppTheme.accentRed)
+              : ('Не сопряжено', 'Отсканируй QR-код в AndroidLink на Маке', AppTheme.textSecondary),
         };
+        final paired = issue != 'unpaired';
 
         return Container(
           padding: const EdgeInsets.all(16),
@@ -198,10 +226,29 @@ class _ConnectionCard extends StatelessWidget {
                     color: AppTheme.textSecondary, fontSize: 12)),
               ],
             )),
+            if (paired)
+              IconButton(
+                tooltip: 'Отвязать',
+                icon: const Icon(CupertinoIcons.link, color: AppTheme.textSecondary, size: 20),
+                onPressed: () => _confirmUnpair(context),
+              ),
           ]),
         );
-      },
+  }
+
+  Future<void> _confirmUnpair(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Отвязать Mac?'),
+        content: const Text('Синхронизация остановится. Для повторного подключения нужно будет снова отсканировать QR.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Отмена')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Отвязать')),
+        ],
+      ),
     );
+    if (ok == true) await BridgeService.instance.unpair();
   }
 }
 
@@ -212,16 +259,17 @@ class _PermissionsCard extends StatelessWidget {
     required this.callsGranted,
     required this.notifGranted,
     required this.notifListener,
+    required this.batteryExempt,
     required this.onRequest,
     required this.onOpenNotifSettings,
   });
-  final bool smsGranted, callsGranted, notifGranted, notifListener;
+  final bool smsGranted, callsGranted, notifGranted, notifListener, batteryExempt;
   final VoidCallback onRequest;
   final VoidCallback onOpenNotifSettings;
 
   @override
   Widget build(BuildContext context) {
-    final baseGranted = smsGranted && callsGranted && notifGranted;
+    final baseGranted = smsGranted && callsGranted && notifGranted && batteryExempt;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -243,6 +291,8 @@ class _PermissionsCard extends StatelessWidget {
               desc: 'Зеркалить на Mac'),
           _PermRow(label: 'Слушатель уведомлений', granted: notifListener,
               desc: 'Все уведомления → Mac'),
+          _PermRow(label: 'Работа в фоне', granted: batteryExempt,
+              desc: 'Без ограничений батареи — связь не рвётся'),
           if (!baseGranted) ...[
             const SizedBox(height: 12),
             SizedBox(
@@ -424,13 +474,15 @@ class _QrScanScreenState extends State<_QrScanScreen> {
             if (_scanned) return;
             final val = capture.barcodes.firstOrNull?.rawValue;
             if (val == null) return;
-            if (!val.startsWith('androidlink://')) return;
+            if (!val.startsWith('androidlink://pair')) return;
             _scanned = true;
-            BridgeService.instance.connectViaQr(val);
+            final messenger = ScaffoldMessenger.of(context);
             Navigator.of(context).pop();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Подключаемся к Mac...')),
-            );
+            BridgeService.instance.connectViaQr(val).then((ok) {
+              messenger.showSnackBar(SnackBar(content: Text(ok
+                  ? 'Сопряжено, подключаемся к Mac...'
+                  : 'Неверный QR-код. Обнови AndroidLink на Маке')));
+            });
           },
         ),
         // Прицел
